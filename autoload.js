@@ -37,25 +37,6 @@ function loadExternalResource(url, type) {
   });
 }
 
-// 模型预载：随页面一起并行预取模型的两个大文件（moc3 网格 + 主贴图），
-// 让博客页面的看板娘几乎无需等待。若已存在同名 preload 则跳过，避免重复。
-function preloadModel() {
-  const files = [
-    { href: model_root + 'model/furina/furina.moc3', as: 'fetch', type: 'application/octet-stream' },
-    { href: model_root + 'model/furina/furina.8192/texture_00.png', as: 'image', type: 'image/png', crossOrigin: 'anonymous' }
-  ];
-  for (const f of files) {
-    if (document.querySelector(`link[rel="preload"][href="${f.href}"]`)) continue;
-    const link = document.createElement('link');
-    link.rel = 'preload';
-    link.as = f.as;
-    link.href = f.href;
-    if (f.type) link.type = f.type;
-    if (f.crossOrigin) link.crossOrigin = f.crossOrigin;
-    document.head.appendChild(link);
-  }
-}
-
 (async () => {
   // 初始化运行时参数（内置默认 + 可选 LIVE2D_PRESET 预设 + localStorage 覆盖）
   (function initConfig() {
@@ -71,8 +52,9 @@ function preloadModel() {
     window.__live2dConfig = cfg;
   })();
 
-  // 页面解析到脚本立即并行预取模型大文件
-  preloadModel();
+  // 注：移除 preloadModel()。此前其注入的 <link rel=preload as=fetch> 会抢占下载 91MB moc3，
+  // 阻塞页面 load 事件，并与插件真实 fetch 重复下载大文件，导致在同源 github.io 上加载超时失败、看板娘消失。
+  // 模型回归插件自身的正常加载流程。
 
   // 避免图片资源跨域问题
   const OriginalImage = window.Image;
