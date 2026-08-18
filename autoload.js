@@ -10,11 +10,10 @@
 // 下面两个相对路径即可直接工作（模型与页面同源，无跨域问题）。无需逐行改成绝对 URL。
 // 如果你打算把模型放在别的源（例如对象存储），或由于站点 rewrite 导致相对路径失效，才需要改成绝对路径，
 // 例如：const live2d_path = 'https://<用户名>.github.io/<仓库名>/dist/';  注意末尾 / 必须保留。
-// 固定为 GitHub Pages 绝对路径（同源，CORS 就绪，加载大模型稳定）
-// 之前改走自定义加速 DNS 会导致浏览器加载大文件不稳定而"刷不出来"，已回滚。
+// 固定为 GitHub Pages 绝对路径（同源，CORS 就绪）
 const live2d_path = 'https://827802685.github.io/Live2D/dist/';
-// 模型根路径与本项目同源（GitHub Pages），避免外部 DNS 在大文件传输上不稳定导致加载失败
-const model_root = 'https://827802685.github.io/Live2D/';
+// 模型大文件（91MB moc3 等）走自定义加速 DNS（镜像 raw.githubusercontent.com），避免 github.io 传输大文件过慢
+const model_root = 'https://raw-githubusercontent-com-gh.zjkl0330.dpdns.org/827802685/Live2D/refs/heads/master/';
 
 // 封装异步资源加载
 function loadExternalResource(url, type) {
