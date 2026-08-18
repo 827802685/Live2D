@@ -102,7 +102,9 @@
   }
 
   function formatVal(f, v) {
-    return (f.unit === '' && f.step < 1 ? v.toFixed(f.step < 0.05 ? 3 : 2) : v) + (f.key === 'deadZone' ? '' : '');
+    var n = parseFloat(v);
+    if (!isNaN(n)) v = n;
+    return (f.unit === '' && f.step < 1 ? v.toFixed(f.step < 0.05 ? 3 : 2) : v);
   }
 
   var sliders = {};
