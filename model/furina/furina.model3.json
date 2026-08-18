@@ -1,0 +1,126 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "furina.moc3",
+		"Textures": [
+			"furina.8192/texture_00.png"
+		],
+		"Physics": "furina.physics3.json",
+		"DisplayInfo": "furina.cdi3.json",
+		"Motions": {
+			"Idle": [
+				{
+					"File": "motions/idle.motion3.json",
+					"FadeInTime": 0.5,
+					"FadeOutTime": 0.5
+				}
+			],
+			"TapBody": [
+				{
+					"File": "motions/tap.motion3.json",
+					"FadeInTime": 0.3,
+					"FadeOutTime": 0.3
+				}
+			],
+			"ChangeFlood": [
+				{
+					"File": "motions/flood.motion3.json",
+					"FadeInTime": 0.3,
+					"FadeOutTime": 0.3
+				}
+			],
+			"SpreadHands": [
+				{
+					"File": "motions/spread.motion3.json",
+					"FadeInTime": 0.3,
+					"FadeOutTime": 0.3
+				}
+			]
+		},
+		"Expressions": [
+			{
+				"Name": "cover_mouth",
+				"File": "expressions/cover_mouth.exp3.json"
+			},
+			{
+				"Name": "cry",
+				"File": "expressions/cry.exp3.json"
+			},
+			{
+				"Name": "angry",
+				"File": "expressions/angry.exp3.json"
+			},
+			{
+				"Name": "stars",
+				"File": "expressions/stars.exp3.json"
+			},
+			{
+				"Name": "sweat",
+				"File": "expressions/sweat.exp3.json"
+			},
+			{
+				"Name": "cat_mouth",
+				"File": "expressions/cat_mouth.exp3.json"
+			},
+			{
+				"Name": "hat",
+				"File": "expressions/hat.exp3.json"
+			},
+			{
+				"Name": "sign",
+				"File": "expressions/sign.exp3.json"
+			},
+			{
+				"Name": "cake",
+				"File": "expressions/cake.exp3.json"
+			},
+			{
+				"Name": "spoon",
+				"File": "expressions/spoon.exp3.json"
+			},
+			{
+				"Name": "cheek_rest",
+				"File": "expressions/cheek_rest.exp3.json"
+			},
+			{
+				"Name": "smart",
+				"File": "expressions/smart.exp3.json"
+			},
+			{
+				"Name": "blush",
+				"File": "expressions/blush.exp3.json"
+			},
+			{
+				"Name": "walk_toggle",
+				"File": "expressions/walk_toggle.exp3.json"
+			},
+			{
+				"Name": "fish",
+				"File": "expressions/fish.exp3.json"
+			},
+			{
+				"Name": "antenna_fan",
+				"File": "expressions/antenna_fan.exp3.json"
+			},
+			{
+				"Name": "drink",
+				"File": "expressions/drink.exp3.json"
+			}
+		]
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": [
+				"ParamMouthForm",
+				"ParamMouthOpenY"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": []
+		}
+	]
+}

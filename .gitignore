@@ -1,0 +1,10 @@
+# 源模型目录（重复于 model/furina/，不提交）
+芙宁娜免费模型/
+
+# 本地服务器脚本
+server.js
+
+# 临时文件
+_browsetest/
+_oml/
+_oml.tgz
