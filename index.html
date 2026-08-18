@@ -1,136 +1,33 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Furina · Live2D</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; }
-    body {
-      font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
-      background: #1a1a2e;
-      color: #eee;
-      overflow: hidden;
-    }
-    .header {
-      position: fixed; top: 0; left: 0; right: 0;
-      height: 56px;
-      background: rgba(20, 20, 40, 0.9);
-      display: flex; align-items: center;
-      padding: 0 24px;
-      z-index: 10;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-    }
-    .header h1 {
-      font-size: 20px; font-weight: 600;
-      background: linear-gradient(90deg, #7ab8ff, #a48fff);
-      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-    }
-    .header .sub { margin-left: 12px; font-size: 12px; color: #888; }
-    .stage {
-      position: absolute; top: 56px; left: 0; right: 0; bottom: 0;
-      display: flex; align-items: center; justify-content: center;
-    }
-    canvas { display: block; max-width: 90vw; max-height: 85vh; }
-    .panel {
-      position: fixed; right: 20px; top: 80px;
-      width: 220px; background: rgba(30, 30, 55, 0.92);
-      border: 1px solid rgba(255,255,255,0.08);
-      border-radius: 12px; padding: 16px;
-      z-index: 10; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
-    }
-    .panel h3 { font-size: 14px; margin-bottom: 10px; color: #9cc0ff; }
-    .panel .btn {
-      display: block; width: 100%; margin-bottom: 8px;
-      padding: 8px 12px; background: linear-gradient(135deg, #4a7bff, #8f5bff);
-      border: none; border-radius: 8px; color: #fff;
-      font-size: 14px; cursor: pointer; transition: filter 0.2s;
-    }
-    .panel .btn:hover { filter: brightness(1.15); }
-    .panel .btn:active { transform: scale(0.97); }
-    .panel select {
-      width: 100%; padding: 8px; margin-top: 4px;
-      background: #22224a; color: #eee;
-      border: 1px solid #444; border-radius: 8px; font-size: 13px;
-    }
-    .status {
-      margin-top: 10px; font-size: 12px; color: #8a8ab0;
-      min-height: 16px; word-break: break-all;
-    }
-    .footer {
-      position: fixed; bottom: 10px; left: 0; right: 0;
-      text-align: center; font-size: 12px; color: #666; z-index: 10;
-    }
-    .loading-overlay {
-      position: fixed; inset: 0; z-index: 100;
-      background: rgba(10, 10, 30, 0.92);
-      display: flex; flex-direction: column;
-      align-items: center; justify-content: center;
-      gap: 16px;
-    }
-    .loading-overlay.hidden { display: none; }
-    .spinner {
-      width: 48px; height: 48px;
-      border: 3px solid rgba(122, 184, 255, 0.2);
-      border-top-color: #7ab8ff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    .loading-text { color: #9cc0ff; font-size: 14px; }
-  </style>
+<meta charset="UTF-8">
+<title>Furina Live2D</title>
+<style>
+body { margin: 0; background: #1a1a2e; overflow: hidden; }
+canvas { display: block; width: 100vw; height: 100vh; }
+#status { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: #888; font-size: 12px; }
+</style>
 </head>
 <body>
-  <div class="loading-overlay" id="loading">
-    <div class="spinner"></div>
-    <div class="loading-text" id="loading-text">正在加载模型...</div>
-  </div>
-
-  <div class="header">
-    <h1>芙宁娜 · Furina</h1>
-    <span class="sub">Live2D Cubism 5</span>
-  </div>
-
-  <div class="stage">
-    <canvas id="live2d"></canvas>
-  </div>
-
-  <div class="panel">
-    <h3>Motion</h3>
-    <button class="btn" id="btn-idle">Idle</button>
-    <button class="btn" id="btn-tap">Tap (变芒)</button>
-    <button class="btn" id="btn-flood">Flood (变荒)</button>
-    <button class="btn" id="btn-spread">Spread</button>
-    <h3>Expression</h3>
-    <select id="expression-select">
-      <option value="">Default</option>
-      <option value="cover_mouth">捂嘴 cover_mouth</option>
-      <option value="cry">哭 cry</option>
-      <option value="angry">生气 angry</option>
-      <option value="stars">星星 stars</option>
-      <option value="sweat">汗 sweat</option>
-      <option value="cat_mouth">猫猫嘴 cat_mouth</option>
-      <option value="hat">帽子 hat</option>
-      <option value="sign">牌子 sign</option>
-      <option value="cake">拿蛋糕 cake</option>
-      <option value="spoon">拿勺子 spoon</option>
-      <option value="cheek_rest">托脸 cheek_rest</option>
-      <option value="smart">大聪明 smart</option>
-      <option value="blush">小脸红 blush</option>
-      <option value="walk_toggle">走路切换 walk_toggle</option>
-      <option value="fish">鱼鱼 fish</option>
-      <option value="antenna_fan">呆毛电风扇 antenna_fan</option>
-      <option value="drink">喝饮料 drink</option>
-    </select>
-    <div class="status" id="status">初始化中…</div>
-  </div>
-
-  <div class="footer">Furina Free Model · Local Demo</div>
-
-  <script src="js/pixi.min.js"></script>
-  <script src="js/live2dcubismcore.min.js"></script>
-  <script src="js/cubism4.min.js"></script>
-  <script src="js/main.js"></script>
+<canvas id="c"></canvas>
+<div id="status">加载中...</div>
+<script src="js/pixi.min.js"></script>
+<script src="js/live2dcubismcore.min.js"></script>
+<script src="js/cubism4.min.js"></script>
+<script>
+var app = new PIXI.Application({ view: document.getElementById('c'), width: window.innerWidth, height: window.innerHeight, transparent: true });
+PIXI.live2d.Live2DModel.from('model/furina/furina.model3.json').then(function(model) {
+  model.scale.set(0.5, 0.5);
+  model.anchor.set(0.5, 0.5);
+  model.position.set(app.screen.width / 2, app.screen.height / 2);
+  app.stage.addChild(model);
+  model.motion('Idle');
+  document.getElementById('status').textContent = '已加载';
+}).catch(function(e) {
+  console.error(e);
+  document.getElementById('status').textContent = '加载失败: ' + e.message;
+});
+</script>
 </body>
 </html>
