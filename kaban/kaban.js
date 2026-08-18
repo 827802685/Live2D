@@ -1,13 +1,4 @@
-/* Furina Kaban Girl - embeddable Live2D widget
- * Usage:
- *   <link rel="stylesheet" href="kaban/kaban.css">
- *   <script src="kaban/kaban.js" data-model="model/furina/furina.model3.json"></script>
- * Options (data-* on the script tag, or window.KabanConfig):
- *   data-model  : path to model3.json (required)
- *   data-size   : canvas height in px (default 400)
- *   data-pos    : "right" (default) or "left"
- *   data-tip    : initial hover tip text
- */
+/* Furina Kaban Girl - embeddable Live2D widget */
 (function () {
   "use strict";
 
@@ -32,7 +23,6 @@
   }
 
   function resolveUrl(u) {
-    // resolve relative to the page, or to kaban base if starts with none
     if (/^(https?:)?\/\//.test(u)) return u;
     return base + u;
   }
@@ -46,7 +36,9 @@
 
     var stage = document.createElement("div");
     stage.className = "kaban-stage";
-    stage.innerHTML = '<canvas class="kaban-canvas"></canvas><div class="kaban-tip"></div>';
+    stage.innerHTML =
+      '<canvas class="kaban-canvas"></canvas>' +
+      '<div class="kaban-tip"></div>';
 
     var toggle = document.createElement("div");
     toggle.className = "kaban-toggle";
@@ -63,10 +55,9 @@
     els.canvas = stage.querySelector("canvas");
     els.toggle = toggle;
 
-    els.tip.textContent = tipText;
+    els.tip.textContent = "加载中…";
     els.tip.classList.add("show");
 
-    // hide/show
     toggle.addEventListener("click", function () {
       if (wrap.classList.contains("kaban-hidden")) {
         wrap.classList.remove("kaban-hidden");
@@ -124,6 +115,7 @@
       resolution: Math.min(window.devicePixelRatio || 1, 2)
     });
 
+    els.tip.textContent = "正在加载模型（95MB）…请稍等";
     return PIXI.live2d.Live2DModel.from(modelUrl, { autoInteract: true }).then(function (model) {
       model.scale.set(0.2, 0.2);
       model.anchor.set(0.5, 0.5);
@@ -135,7 +127,6 @@
         model.motion("Idle");
       }
 
-      // click => TapBody motion + bubble
       model.on("pointerdown", function () {
         try {
           if (manager && manager.groups && manager.groups.TapBody) model.motion("TapBody");
@@ -143,7 +134,12 @@
         showTip(tipText, 2500);
       });
 
+      els.tip.textContent = "";
       return model;
+    }).catch(function (e) {
+      console.error("[Kaban] model load error:", e);
+      els.tip.textContent = "加载失败: " + e.message;
+      throw e;
     });
   }
 
@@ -155,7 +151,6 @@
     if (ms) tipTimer = setTimeout(function () { els.tip.classList.remove("show"); }, ms);
   }
 
-  // public API
   window.Kaban = {
     showTip: showTip,
     hide: function () { els.wrap.classList.add("kaban-hidden"); },
