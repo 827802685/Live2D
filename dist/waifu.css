@@ -299,6 +299,38 @@
   letter-spacing: 1px;
   white-space: nowrap;
 }
+/* 渲染完成前隐藏看板娘主体，避免空 canvas/未渲染模型提前蹦出 */
+body.live2d-loading #waifu {
+  visibility: hidden;
+}
+/* 实时下载进度条 */
+.waifu-loading-bar {
+  width: 180px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(110, 130, 255, 0.18);
+  overflow: hidden;
+}
+.waifu-loading-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #5a8cff, #7c5ce5);
+  transition: width .25s ease;
+}
+.waifu-loading-pct {
+  color: #cdd6ff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.waifu-loading-info {
+  color: rgba(205, 214, 255, 0.75);
+  font-size: 12px;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 @keyframes waifu-spin {
   to { transform: rotate(360deg); }
 }
