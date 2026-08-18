@@ -12,7 +12,8 @@
 // 例如：const live2d_path = 'https://<用户名>.github.io/<仓库名>/dist/';  注意末尾 / 必须保留。
 const live2d_path = './dist/';
 // 模型清单（model_list.json）所在根路径，同样以 / 结尾
-const model_root = './';
+// 改为走自定义加速 DNS（镜像 raw.githubusercontent.com），加速加载大模型（furina.moc3 91MB）
+const model_root = 'https://raw-githubusercontent-com-gh.zjkl0330.dpdns.org/827802685/Live2D/refs/heads/master/';
 
 // 封装异步资源加载
 function loadExternalResource(url, type) {
