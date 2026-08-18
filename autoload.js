@@ -65,7 +65,7 @@ function loadExternalResource(url, type) {
   showLoading();
 })();
 
-// 在左下角注入加载转圈 + 蓝色文案，模型加载完成(live2d:loaded)后自动移除
+// 在左下角注入加载转圈 + 蓝色文案，模型真正渲染出第一帧(live2d:rendered)后自动移除
 function showLoading() {
   if (document.getElementById('waifu-loading')) return;
   const wrap = document.createElement('div');
@@ -74,9 +74,15 @@ function showLoading() {
     '<div class="waifu-loading-spin"></div>' +
     '<div class="waifu-loading-text">看板娘正在准备迎客</div>';
   document.body.appendChild(wrap);
-  window.addEventListener('live2d:loaded', function onLoaded() {
+
+  function hide() {
     const el = document.getElementById('waifu-loading');
     if (el) el.remove();
-    window.removeEventListener('live2d:loaded', onLoaded);
-  }, { once: true });
+    window.removeEventListener('live2d:rendered', hide);
+    window.removeEventListener('live2d:loaded', hide);
+  }
+  window.addEventListener('live2d:rendered', hide, { once: true });
+  // 兜底：就算渲染事件没触发（如 WebGL 不可用），最多 60 秒后也移除，避免永久挡着
+  window.addEventListener('live2d:loaded', hide, { once: true });
+  setTimeout(hide, 60000);
 }
