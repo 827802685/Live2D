@@ -58,7 +58,7 @@
 
   // 说明
   var tip = document.createElement('div');
-  tip.textContent = '拖动滑块即实时生效，自动保存到本机，刷新后保持。';
+  tip.textContent = '拖动滑块即实时生效，自动保存到本机，刷新后保持。头部角度已加防过载限位，避免快速滑动时头部渲染错位。';
   tip.style.cssText = 'padding:6px 12px;font-size:12px;opacity:.75;';
   wrap.appendChild(tip);
 
