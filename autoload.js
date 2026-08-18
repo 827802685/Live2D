@@ -113,6 +113,7 @@ function showLoading() {
   // 只在真正渲染出第一帧后才放行看板娘 + 移除转圈；
   // 不再用 live2d:loaded(仅下载完成，尚未渲染)提前移除。
   window.addEventListener('live2d:rendered', hide, { once: true });
-  // 极端兜底：万一渲染事件始终不触发(如 WebGL 被禁用)，40 秒后也放行，避免看板娘永久不可见
-  setTimeout(hide, 40000);
+  // 极端兜底：加速 DNS 拉取 91MB 大文件可能较慢，兜底留足 90 秒；
+  // 若渲染事件始终不触发(如 WebGL 被禁用)，届时也放行，避免看板娘永久不可见
+  setTimeout(hide, 90000);
 }
