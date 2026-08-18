@@ -35,7 +35,29 @@ function loadExternalResource(url, type) {
   });
 }
 
+// 模型预载：随页面一起并行预取模型的两个大文件（moc3 网格 + 主贴图），
+// 让博客页面的看板娘几乎无需等待。若已存在同名 preload 则跳过，避免重复。
+function preloadModel() {
+  const files = [
+    { href: model_root + 'model/furina/furina.moc3', as: 'fetch', type: 'application/octet-stream' },
+    { href: model_root + 'model/furina/furina.8192/texture_00.png', as: 'image', type: 'image/png', crossOrigin: 'anonymous' }
+  ];
+  for (const f of files) {
+    if (document.querySelector(`link[rel="preload"][href="${f.href}"]`)) continue;
+    const link = document.createElement('link');
+    link.rel = 'preload';
+    link.as = f.as;
+    link.href = f.href;
+    if (f.type) link.type = f.type;
+    if (f.crossOrigin) link.crossOrigin = f.crossOrigin;
+    document.head.appendChild(link);
+  }
+}
+
 (async () => {
+  // 页面解析到脚本立即并行预取模型大文件
+  preloadModel();
+
   // 避免图片资源跨域问题
   const OriginalImage = window.Image;
   window.Image = function (...args) {
