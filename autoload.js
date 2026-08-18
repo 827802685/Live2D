@@ -13,8 +13,8 @@
 // 固定为 GitHub Pages 绝对路径（同源，CORS 就绪，加载大模型稳定）
 // 之前改走自定义加速 DNS 会导致浏览器加载大文件不稳定而"刷不出来"，已回滚。
 const live2d_path = 'https://827802685.github.io/Live2D/dist/';
-// 模型根路径走自定义加速 DNS（镜像 raw.githubusercontent.com 的整个仓库）
-const model_root = 'https://raw-githubusercontent-com-gh.zjkl0330.dpdns.org/827802685/Live2D/refs/heads/master/';
+// 模型根路径与本项目同源（GitHub Pages），避免外部 DNS 在大文件传输上不稳定导致加载失败
+const model_root = 'https://827802685.github.io/Live2D/';
 
 // 封装异步资源加载
 function loadExternalResource(url, type) {
