@@ -60,4 +60,23 @@ function loadExternalResource(url, type) {
     drag: false,
     logLevel: 'info'
   });
+
+  // 加载动画：模型就绪前显示"转圈 + 蓝色：看板娘正在准备迎客"
+  showLoading();
 })();
+
+// 在左下角注入加载转圈 + 蓝色文案，模型加载完成(live2d:loaded)后自动移除
+function showLoading() {
+  if (document.getElementById('waifu-loading')) return;
+  const wrap = document.createElement('div');
+  wrap.id = 'waifu-loading';
+  wrap.innerHTML =
+    '<div class="waifu-loading-spin"></div>' +
+    '<div class="waifu-loading-text">看板娘正在准备迎客</div>';
+  document.body.appendChild(wrap);
+  window.addEventListener('live2d:loaded', function onLoaded() {
+    const el = document.getElementById('waifu-loading');
+    if (el) el.remove();
+    window.removeEventListener('live2d:loaded', onLoaded);
+  }, { once: true });
+}
