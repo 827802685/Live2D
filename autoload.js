@@ -55,6 +55,20 @@ function preloadModel() {
 }
 
 (async () => {
+  // 初始化运行时参数（内置默认 + 可选 LIVE2D_PRESET 预设 + localStorage 覆盖）
+  (function initConfig() {
+    const preset = (typeof LIVE2D_PRESET !== 'undefined') ? LIVE2D_PRESET : {};
+    const cfg = Object.assign(
+      { angleX: 30, angleY: 30, angleZ: 30, bodyAngleX: 10, deadZone: 0.06 },
+      preset || {}
+    );
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('live2dConfig') || 'null');
+      if (saved && typeof saved === 'object') Object.assign(cfg, saved);
+    } catch (e) {}
+    window.__live2dConfig = cfg;
+  })();
+
   // 页面解析到脚本立即并行预取模型大文件
   preloadModel();
 
@@ -85,6 +99,9 @@ function preloadModel() {
 
   // 加载动画：模型就绪前显示"转圈 + 蓝色：看板娘正在准备迎客"
   showLoading();
+
+  // 加载参数设置面板（右下角齿轮可收起/唤出，拖动滑块即时调参）
+  loadExternalResource(live2d_path + 'config-panel.js', 'js');
 })();
 
 // 在左下角注入加载转圈 + 蓝色文案，模型真正渲染出第一帧(live2d:rendered)后自动移除
