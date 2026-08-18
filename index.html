@@ -1,33 +1,63 @@
 <!DOCTYPE html>
-<html>
+<html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<title>Furina Live2D</title>
-<style>
-body { margin: 0; background: #1a1a2e; overflow: hidden; }
-canvas { display: block; width: 100vw; height: 100vh; }
-#status { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%); color: #888; font-size: 12px; }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>芙宁娜 Live2D 看板娘示例</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: #e8e4f5;
+      background:
+        radial-gradient(1200px 600px at 80% -10%, rgba(124, 92, 225, 0.45), transparent 60%),
+        radial-gradient(1000px 500px at 10% 110%, rgba(46, 162, 212, 0.35), transparent 60%),
+        linear-gradient(160deg, #17142b, #0d1230 55%, #1b1235);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      max-width: 640px;
+      margin: 40px 20px;
+      padding: 36px 40px;
+      background: rgba(20, 18, 44, 0.66);
+      border: 1px solid rgba(140, 130, 220, 0.28);
+      border-radius: 20px;
+      backdrop-filter: blur(6px);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    }
+    h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: 1px; }
+    .sub { margin: 0 0 20px; color: #a9a4d9; font-size: 14px; }
+    ul { margin: 0; padding-left: 18px; line-height: 1.9; font-size: 14.5px; }
+    code { background: rgba(255, 255, 255, 0.1); padding: 1px 6px; border-radius: 5px; color: #cdd6ff; }
+    .tip {
+      margin-top: 20px;
+      padding: 12px 14px;
+      border-left: 3px solid #7c5ce5;
+      background: rgba(124, 92, 229, 0.12);
+      border-radius: 6px;
+      font-size: 13px;
+      color: #c6c3e6;
+    }
+  </style>
 </head>
 <body>
-<canvas id="c"></canvas>
-<div id="status">加载中...</div>
-<script src="js/pixi.min.js"></script>
-<script src="js/live2dcubismcore.min.js"></script>
-<script src="js/cubism4.min.js"></script>
-<script>
-var app = new PIXI.Application({ view: document.getElementById('c'), width: window.innerWidth, height: window.innerHeight, transparent: true });
-PIXI.live2d.Live2DModel.from('model/furina/furina.model3.json').then(function(model) {
-  model.scale.set(0.5, 0.5);
-  model.anchor.set(0.5, 0.5);
-  model.position.set(app.screen.width / 2, app.screen.height / 2);
-  app.stage.addChild(model);
-  model.motion('Idle');
-  document.getElementById('status').textContent = '已加载';
-}).catch(function(e) {
-  console.error(e);
-  document.getElementById('status').textContent = '加载失败: ' + e.message;
-});
-</script>
+  <div class="card">
+    <h1>原神 · 芙宁娜 看板娘</h1>
+    <p class="sub">Live2D Cubism 3 模型已接入，看左下角～（首次加载需下载约 100MB 模型，请稍候）</p>
+    <ul>
+      <li>芙宁娜模型：<code>github.com/827802685/Live2D @ model/furina</code></li>
+      <li>插件：<code>live2d-widget</code>（自托管 dist）</li>
+      <li>加载方式：<code>cdnPath</code> 模式读取 <code>model_list.json</code></li>
+      <li>点击模型有互动反馈，右下角按钮可切换工具</li>
+    </ul>
+    <div class="tip">若模型未出现：模型过大（moc3 91MB + 8K 贴图 35MB），跨域 CDN 无法直链，必须自托管。请确认后端能稳定提供这几百 MB 的传输。</div>
+  </div>
+
+  <!-- 关键：加载自定义加载脚本 -->
+  <script src="./autoload.js"></script>
 </body>
 </html>
