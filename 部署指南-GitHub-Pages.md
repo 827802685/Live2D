@@ -5,7 +5,7 @@
 - `live2d-widget` 插件核心（`dist/`，含全部运行依赖，无外部 CDN）
 - 原神「芙宁娜」Cubism 3 模型（`model/furina/`，贴图已优化为 4K）
 
-整体约 **99 MB**，其中模型网格 `furina.moc3`（91 MB）在 GitHub 单文件 100 MB 上限内，可用 GitHub Pages 完整托管源，无需切片、无需改造。
+整体约 **94 MB**，其中模型网格 `furina.moc3`（91 MB）在 GitHub 单文件 100 MB 上限内，可用 GitHub Pages 完整托管源，无需切片、无需改造。
 
 ---
 
@@ -27,7 +27,7 @@
 | 实时加载进度条 | 首次加载模型时显示下载进度（百分比 + 已下载/总大小），不再干等 |
 | 设置记忆 | 调好的参数自动存入浏览器 `localStorage`，刷新后保持 |
 
-> 首次访问会下载约 99 MB 模型，之后浏览器缓存生效，再次访问秒开。加载期间左下角会显示转圈 + 进度条，模型渲染出第一帧后自动登场。
+> 首次访问会下载约 94 MB 模型，之后浏览器缓存生效，再次访问秒开。加载期间左下角会显示转圈 + 进度条，模型渲染出第一帧后自动登场。
 
 ---
 
@@ -93,7 +93,7 @@ git push -u origin main
 
 浏览器打开 `https://<你的用户名>.github.io/<仓库名>/index.html`（本集成包当前线上为 `https://827802685.github.io/Live2D/index.html`）
 
-首次加载要下载约 99 MB 模型，左下角会先出现转圈 + 实时下载进度条（显示百分比和已下载/总大小）。进度走完后提示「模型加载完成，正在渲染」，随后芙宁娜登场。若模型正常出现，说明已可对外访问。
+首次加载要下载约 94 MB 模型，左下角会先出现转圈 + 实时下载进度条（显示百分比和已下载/总大小）。进度走完后提示「模型加载完成，正在渲染」，随后芙宁娜登场。若模型正常出现，说明已可对外访问。
 
 > 若进度条长时间停在 0% 不动：可能是加速 DNS 镜像缓存了旧文件，强刷（`Ctrl+Shift+R`）一次即可；若始终无进展，说明网络到该镜像不稳定，可把 `autoload.js` 里的 `model_root` 换成 GitHub Pages 直链（见第 6 步方式 A 的说明）。
 
@@ -169,7 +169,7 @@ git push -u origin main
 <script src="/live2d/autoload.js"></script>
 ```
 
-> 模型约 99 MB，会随博客一起上传，适合模型不常变、想要完全自托管的场景。
+> 模型约 94 MB，会随博客一起上传，适合模型不常变、想要完全自托管的场景。
 
 ### 固化为访客统一生效（可选）
 
@@ -190,10 +190,10 @@ const LIVE2D_PRESET = { "angleX": 30, "angleY": 30, "angleZ": 30, "bodyAngleX": 
 | `dist/*` | 插件核心 + Cubism Core（已本地化） | ~360 KB |
 | `model/furina/index.json` | 模型清单（插件约定格式） | 4 KB |
 | `model/furina/furina.moc3` | 模型网格（Cubism 3 核心数据，无法压缩） | 91 MB |
-| `model/furina/furina.8192/texture_00.png` | 角色贴图（已从 8K/34MB 优化为 4K/7.7MB） | 7.7 MB |
+| `model/furina/furina.8192/texture_00.webp` | 角色贴图（已从 8K/34MB 优化为 4K WebP/2.5MB） | 2.5 MB |
 | `model/furina/furina.physics3.json` | 物理模拟（头发/布料飘动） | 152 KB |
 | `model/furina/furina.cdi3.json` | 显示设置 | 48 KB |
 | `model/furina/expressions/` | 表情（17 个） | — |
 | `model/furina/motions/` | 动作（4 个） | — |
 
-> 首次加载合计约 99 MB，其中 91 MB 是 `moc3` 模型网格，属该模型固有体积，无法再压缩。贴图已从 8K 压到 4K，若仍想进一步减小，可尝试把贴图转 WebP（约 3 MB），但需验证 Cubism Core 兼容性，收益有限，不建议。
+> 首次加载合计约 94 MB，其中 91 MB 是 `moc3` 模型网格，属该模型固有体积，无法再压缩。贴图已从 8K/34MB 压到 4K WebP/2.5MB（q90，经本地实测渲染画质无感知差异；Cubism Core 兼容 WebP 已验证）。

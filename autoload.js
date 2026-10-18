@@ -37,8 +37,8 @@ function loadExternalResource(url, type) {
 // 驱动加载框里的进度条。首次加载需下载的文件总字节数作为进度分母(EXPECTED_TOTAL)。
 // 若日后更换模型，请把 EXPECTED_TOTAL 改为新模型首次加载各文件大小之和。
 function installProgressTracker() {
-  // 首次加载实际下载的文件总字节数：moc3(91MB) + 4K贴图(8MB) + physics + cdi + idle 动作
-  const EXPECTED_TOTAL = 103740290;
+  // 首次加载实际下载的文件总字节数：moc3(91MB) + 4K WebP贴图(2.5MB) + physics + cdi + idle 动作
+  const EXPECTED_TOTAL = 98378358;
   const state = window.__live2dProgress = {
     total: EXPECTED_TOTAL,
     loaded: 0,

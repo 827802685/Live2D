@@ -102,7 +102,7 @@ live2d-furina/
     ├── furina.moc3          # 模型网格（约 91MB）
     ├── furina.physics3.json # 物理模拟（头发/布料飘动）
     ├── furina.cdi3.json     # 显示设置
-    ├── furina.8192/texture_00.png  # 角色贴图
+    ├── furina.8192/texture_00.webp  # 角色贴图（4K WebP，2.5MB）
     ├── expressions/         # 17 个表情
     └── motions/             # 4 个动作
 ```
@@ -125,6 +125,6 @@ live2d-furina/
 
 ## 常见问题
 
-- 首次加载要下载约 99MB 模型（moc3 91MB + 4K 贴图 8MB），会偏慢，属正常；加载框会显示实时进度，之后浏览器缓存会加速。
+- 首次加载要下载约 94MB 模型（moc3 91MB + 4K WebP 贴图 2.5MB），会偏慢，属正常；加载框会显示实时进度，之后浏览器缓存会加速。
 - 若看板娘一直不出现，请强刷（Ctrl+Shift+R），并确认 WebGL 已开启；模型大文件能正常下载时最多等待约 90 秒。
 - 控制台出现 `favicon.ico 404` 或一言接口 `429` 均不影响看板娘，可忽略。
