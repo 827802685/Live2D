@@ -3,7 +3,8 @@
  *
  * 数据：furina-mesh.bin（1.32 MB，int16 量化，含裁剪掩码表）+ furina-atlas.webp（724 KB）
  * 渲染：按原始绘制顺序烘焙成非索引三角流；模板缓冲实现裁剪掩码，还原眼睛/衣摆遮挡
- * 动画：呼吸 / 视线跟随 / 头部倾转 / 发丝摆动，全部在顶点着色器内完成
+ * 动画：呼吸 / 视线跟随 / 头部倾转 / 发丝摆动 / 裙摆飘动 / 体态摇曳 / 呆毛弹簧物理，
+ *       全部在顶点着色器内完成
  */
 (function (global) {
   'use strict';
@@ -16,8 +17,9 @@
     // 位移相加即可叠加（眨眼只动眼睛、表情只动嘴眉），不会互相覆盖。
     'attribute vec2 aBlink;',
     'attribute vec2 aExpr;',
-    'uniform float uTime, uTilt, uBreath, uScale, uAspect, uBlink, uExpr, uAMul;',
-    'uniform vec2 uCenter, uNeck, uOff, uSway, uSkirt, uSkirtAmp, uHalf;',
+    'uniform float uTime, uTilt, uBreath, uScale, uAspect, uBlink, uExpr, uAMul, uAhoA, uBody, uHip;',
+    'uniform vec2 uCenter, uNeck, uOff, uSway, uSkirt, uSkirtAmp, uHalf, uAhoP;',
+    'uniform vec4 uAho;',
     'varying vec2 vUv;',
     'varying float vA;',
     'void main(){',
@@ -29,14 +31,27 @@
     // clip 空间是非等比的：x 方向要先乘 h/w，才能让两个轴的像素密度一致
     '  p.x *= uAspect;',
     '  p *= uScale;',
+    // 头部权重：脖子以上逐渐接管（体态旋转和呆毛都要用到，提前算）
+    '  float w = smoothstep(uNeck.x, uNeck.y, aPos.y);',
+    // 呆毛弹簧：帽子左上那撮悬浮卷发绕根部小幅摆动（模型空间，之后整体跟随头/身运动）
+    '  float ah = smoothstep(uAho.x - 0.006, uAho.x + 0.006, aPos.x) * smoothstep(uAho.z + 0.006, uAho.z - 0.006, aPos.x)',
+    '           * smoothstep(uAho.y - 0.006, uAho.y + 0.006, aPos.y) * smoothstep(uAho.w + 0.006, uAho.w - 0.006, aPos.y);',
+    '  vec2 ad = p - uAhoP;',
+    '  float aa = uAhoA * ah;',
+    '  p = uAhoP + vec2(ad.x * cos(aa) - ad.y * sin(aa), ad.x * sin(aa) + ad.y * cos(aa));',
+    // 体态摇曳：髋部以上整体缓慢倾斜，腿保持 planted
+    '  float hipY = (uHip - uCenter.y) * uScale;',
+    '  float wb = smoothstep(uHip - 0.08, uHip + 0.08, aPos.y);',
+    '  float ab = uBody * wb;',
+    '  vec2 hd = vec2(p.x, p.y - hipY);',
+    '  p = vec2(hd.x * cos(ab) - hd.y * sin(ab), hipY + hd.x * sin(ab) + hd.y * cos(ab));',
     // 呼吸：只在胸腔做局部起伏，不动整体尺寸（否则整只模型会「一胀一缩」）
     '  float chest = smoothstep(uNeck.x - 0.42, uNeck.x - 0.06, aPos.y)',
     '              * (1.0 - smoothstep(uNeck.x - 0.04, uNeck.x + 0.10, aPos.y));',
     '  float br = uBreath - 1.0;',
     '  p.x *= 1.0 + br * 1.5 * chest;',
     '  p.y += br * 0.55 * (0.35 + 0.65 * chest);',
-    // 头部权重：脖子以上逐渐接管
-    '  float w = smoothstep(uNeck.x, uNeck.y, aPos.y);',
+    // 头部以脖子为轴倾转（w 已在前面算好）
     '  float neckY = (uNeck.x - uCenter.y) * uScale;',
     // 以脖子为轴倾转头部
     '  float a = uTilt * w;',
@@ -47,11 +62,14 @@
     '  float lag = sin(uTime * 1.7 - aPos.y * 2.6) * 0.5 + sin(uTime * 0.9 + aPos.x * 3.1) * 0.5;',
     '  p.x += lag * uSway.x * (0.35 + 0.65 * w) * (0.5 + 0.5 * abs(p.x));',
     '  p.y += lag * uSway.y * 0.4;',
-    // 裙摆飘动：只作用在下半身、且离中线较远的顶点（裙幅），
-    // 腿在中间几乎不动；越往下、越靠外，摆幅越大。
+    // 裙摆飘动：只作用在腰线以下的「裙幅」上。
+    // 腿在中间（|x-中线| < 1.3×halfW）完全不动；裙幅/大衣下摆在两侧才飘，
+    // 并且只对裙摆下摆以上的中带做渐隐（大衣垂摆延伸更低，不受下摆限制）。
     '  float skY = clamp((uSkirt.x - aPos.y) / (uSkirt.x - uSkirt.y), 0.0, 1.0);',
-    '  float side = clamp(abs(aPos.x - uCenter.x) / uHalf.x, 0.0, 1.0);',
-    '  float sk = skY * smoothstep(0.50, 1.0, side);',
+    '  float sideF = abs(aPos.x - uCenter.x) / uHalf.x;',
+    '  float drape = smoothstep(1.30, 1.90, sideF);',
+    '  float hem = mix(smoothstep(uSkirt.y - 0.045, uSkirt.y + 0.025, aPos.y), 1.0, drape);',
+    '  float sk = skY * hem * drape;',
     '  float ph = uTime * 1.35;',
     '  float s1 = sin(ph - aPos.y * 7.0 + aPos.x * 2.0);',
     '  float s2 = sin(ph * 0.53 + 2.1 - aPos.y * 3.5);',
@@ -308,7 +326,8 @@
 
     var uu = this.u = {};
     ['uTime', 'uTilt', 'uBreath', 'uScale', 'uAspect', 'uCenter', 'uNeck', 'uOff', 'uSway',
-     'uSkirt', 'uSkirtAmp', 'uHalf', 'uPremul', 'uBlink', 'uExpr', 'uAMul']
+     'uSkirt', 'uSkirtAmp', 'uHalf', 'uPremul', 'uBlink', 'uExpr', 'uAMul',
+     'uAho', 'uAhoP', 'uAhoA', 'uBody', 'uHip']
       .forEach(function (nm) { uu[nm] = gl.getUniformLocation(pr, nm); });
 
     /* ---------- 1. 掩码几何：每个掩码体只烘焙一次，交错 [x,y,u,v,a] ---------- */
@@ -376,9 +395,11 @@
       scale: this.fitScale(box),
       neck: y0 + bh * 0.655,
       neckTop: y0 + bh * 0.735,
-      /* 裙摆飘动的作用区间：从腰线往下到底部，越靠下摆幅越大 */
+      /* 裙摆飘动的作用区间：腰线 → 裙摆下摆（腿从下摆以下露出，不再参与摆动） */
       skirtTop: y0 + bh * 0.58,
-      skirtBottom: y0 + bh * 0.02,
+      skirtBottom: y0 + bh * 0.33,
+      /* 体态摇曳的旋转轴：髋部 */
+      hip: y0 + bh * 0.37,
       halfW: Math.max(0.08, box.w * 0.30)
     };
     this.bbox = box;
@@ -558,6 +579,34 @@
     }
     if (total === 0) { x0 = y0 = 0; x1 = 3000; y1 = 4500; }
     this.box = { x0: x0, x1: x1, y0: y0, y1: y1, w: x1 - x0, h: y1 - y0 };
+
+    /* 6. 呆毛包围盒：帽子左上那撮悬浮卷发（x 在中线左侧、贴近模型顶部的独立小部件）。
+          用于顶点着色器里的弹簧摆动；找不到就置 null（摆动权重恒 0）。 */
+    var aho = null;
+    var cxHalf = (x0 + x1) / 2, yGate = y0 + (y1 - y0) * 0.88;
+    for (k = 0; k < d.N; k++) {
+      if (!d.ic[k] || hide[k]) continue;
+      if (d.vc[k] > 160) continue;
+      var ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9;
+      for (j = 0; j < d.vc[k]; j++) {
+        var vi2 = (d.vOff[k] + j) * 2;
+        var vx = pos[vi2] / KQ, vy = pos[vi2 + 1] / KQ;
+        if (vx < ax0) ax0 = vx; if (vx > ax1) ax1 = vx;
+        if (vy < ay0) ay0 = vy; if (vy > ay1) ay1 = vy;
+      }
+      if (ay0 > yGate && ax1 < cxHalf + 0.05) {
+        if (!aho) aho = { x0: ax0, y0: ay0, x1: ax1, y1: ay1 };
+        else {
+          if (ax0 < aho.x0) aho.x0 = ax0;
+          if (ay0 < aho.y0) aho.y0 = ay0;
+          if (ax1 > aho.x1) aho.x1 = ax1;
+          if (ay1 > aho.y1) aho.y1 = ay1;
+        }
+      }
+    }
+    this.ahoBox = aho;
+    /* 根部在卷发靠近头的一侧（右下角） */
+    this.ahoPivot = aho ? [aho.x1 - 0.006, aho.y0 + 0.010] : null;
     return this;
   };
 
@@ -789,6 +838,19 @@
       exprW = this.o.forceExprW == null ? 1 : +this.o.forceExprW;
     }
 
+    /* 呆毛弹簧摆动：跟随头部水平运动 + 慢速自摆，欠阻尼弹簧产生游戏里的回弹感 */
+    if (this.ahoA == null) { this.ahoA = 0; this.ahoV = 0; this._px = this.cur.x; }
+    var adt = Math.max(0.001, Math.min(0.05, dt));
+    var hv = (this.cur.x - this._px) / adt;
+    this._px = this.cur.x;
+    var at = -hv * 0.09 + Math.sin(time * 2.2) * 0.09 + Math.sin(time * 3.4 + 1.4) * 0.045;
+    if (!idle) at = 0;
+    if (at > 0.5) at = 0.5; else if (at < -0.5) at = -0.5;
+    this.ahoV += (-(this.ahoA - at) * 46 - this.ahoV * 10) * adt;
+    this.ahoA += this.ahoV * adt;
+    /* 体态摇曳：绕髋部的缓慢倾斜（腿不动，躯干/手臂/头一起摆） */
+    this.bodyA = idle ? 0.012 * Math.sin(time * 0.85) : 0;
+
     gl.uniform1f(u.uTime, time);
     gl.uniform1f(u.uTilt, -this.cur.x * 0.105);
     gl.uniform1f(u.uBreath, breath);
@@ -799,8 +861,22 @@
     gl.uniform2f(u.uOff, this.cur.x * 0.015, -this.cur.y * 0.010);
     gl.uniform2f(u.uSway, idle ? 0.006 : 0, idle ? 0.0026 : 0);
     gl.uniform2f(u.uSkirt, b.skirtTop, b.skirtBottom);
-    gl.uniform2f(u.uSkirtAmp, idle ? 0.130 : 0, idle ? 0.030 : 0);
+    gl.uniform2f(u.uSkirtAmp, idle ? 0.095 : 0, idle ? 0.016 : 0);
     gl.uniform2f(u.uHalf, b.halfW, 1);
+    if (this.ahoBox && this.ahoPivot) {
+      var aA = this.cv.height / this.cv.width;
+      gl.uniform4f(u.uAho, this.ahoBox.x0, this.ahoBox.y0, this.ahoBox.x1, this.ahoBox.y1);
+      gl.uniform2f(u.uAhoP,
+        (this.ahoPivot[0] - b.cx) * aA * b.scale,
+        (this.ahoPivot[1] - b.cy) * b.scale);
+      gl.uniform1f(u.uAhoA, this.ahoA);
+    } else {
+      gl.uniform4f(u.uAho, 10, 10, 10, 10);
+      gl.uniform2f(u.uAhoP, 0, 0);
+      gl.uniform1f(u.uAhoA, 0);
+    }
+    gl.uniform1f(u.uBody, this.bodyA || 0);
+    gl.uniform1f(u.uHip, b.hip);
     gl.uniform1f(u.uBlink, 0);
     gl.uniform1f(u.uExpr, 0);
 

@@ -126,7 +126,7 @@
       原模型是一个 <b>95.5 MB</b> 的 <code>moc3</code>，浏览器得先下完才能动。
       这里把它拆成量化网格 + 一张 WebP 图集：<b>不用 Cubism Core，不引任何运行时库</b>，
       光栅化是一段手写的 WebGL。<br>
-      眨眼、表情、呼吸、发丝摆动都是<b>真帧数据</b>或顶点着色器算的，她不会僵在原地。
+      眨眼、表情、呼吸、发丝与裙摆、体态摇曳、呆毛弹簧物理都是<b>真帧数据</b>或顶点着色器算的，她不会僵在原地。
     </p>
 
     <div class="bars">
@@ -172,7 +172,7 @@
 
 <div class="boot" id="boot"><div><div class="sp"></div><p>loading</p></div></div>
 
-<script src="./furina-mini/furina-mini.js"></script>
+<script src="./dist/furina-mini.js"></script>
 <script>
 (function () {
   var host = document.getElementById('f');
@@ -192,7 +192,7 @@
 
   FurinaMini.mount('#f', {
     size: parseInt(host.style.width, 10) || 420,
-    base: './furina-mini/',
+    base: './dist/',
     frames: ['blink', 'eyeLeft', 'eyeRight', 'eyeUp', 'eyeDown',
              'smile', 'catMouth', 'mouthOpen', 'angry', 'cry', 'blush']
   })
