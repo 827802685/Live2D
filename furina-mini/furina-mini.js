@@ -443,11 +443,12 @@
     this.coveredSet = covered;
 
     var order = [];
+    var visMark = new Uint8Array(d.N);
     for (k = 0; k < d.N; k++) {
       var vis = d.ic[k] > 0 && (d.op[k] / 255 >= minA || (covered && covered.has(k)))
         && (o.drawMaskTargets || !d.maskTarget[k]) && !hide[k]
         && (o.maxOrder == null || d.ro[k] <= o.maxOrder);
-      if (vis) order.push([d.ro[k], k]);
+      if (vis) { order.push([d.ro[k], k]); visMark[k] = 1; }
     }
     var rev = !!o.reverseOrder;
     if (o.sortBy === 'index') {
@@ -455,6 +456,47 @@
     } else {
       order.sort(function (a, b) { return rev ? b[0] - a[0] : a[0] - b[0]; });
     }
+
+    /* 1.5 呆毛识别：头顶左侧的独立卷发小部件。
+          原模型里它的 7 段网格全被 ArtMesh159 遮罩裁剪，根部被剪掉悬在半空；
+          这里解除遮罩让整条卷发完整显示（根部搭在头发上，看起来是长出来的）。 */
+    var ahoSet = null, ahoBox = null;
+    if (o.ahoFree !== false) {
+      var pos0 = d.pos, KQ2 = 32767 / 1.5;
+      var gb = { x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9 };
+      var cands = [];
+      for (k = 0; k < d.N; k++) {
+        if (!visMark[k] || d.vc[k] > 160) continue;
+        var ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9;
+        for (j = 0; j < d.vc[k]; j++) {
+          var wi = (d.vOff[k] + j) * 2;
+          var wx = pos0[wi] / KQ2, wy = pos0[wi + 1] / KQ2;
+          if (wx < ax0) ax0 = wx; if (wx > ax1) ax1 = wx;
+          if (wy < ay0) ay0 = wy; if (wy > ay1) ay1 = wy;
+        }
+        if (ax0 < gb.x0) gb.x0 = ax0; if (ax1 > gb.x1) gb.x1 = ax1;
+        if (ay0 < gb.y0) gb.y0 = ay0; if (ay1 > gb.y1) gb.y1 = ay1;
+        cands.push([ax0, ay0, ax1, ay1, k]);
+      }
+      var gcx = (gb.x0 + gb.x1) / 2, gyGate = gb.y0 + (gb.y1 - gb.y0) * 0.88;
+      for (k = 0; k < cands.length; k++) {
+        var cb = cands[k];
+        if (cb[1] > gyGate && cb[2] < gcx + 0.05) {
+          if (!ahoBox) ahoBox = { x0: cb[0], y0: cb[1], x1: cb[2], y1: cb[3] };
+          else {
+            if (cb[0] < ahoBox.x0) ahoBox.x0 = cb[0];
+            if (cb[1] < ahoBox.y0) ahoBox.y0 = cb[1];
+            if (cb[2] > ahoBox.x1) ahoBox.x1 = cb[2];
+            if (cb[3] > ahoBox.y1) ahoBox.y1 = cb[3];
+          }
+          if (!ahoSet) ahoSet = new Uint8Array(d.N);
+          ahoSet[cb[4]] = 1;
+        }
+      }
+    }
+    this.ahoBox = ahoBox;
+    /* 根部在卷发靠近头的一侧（右下角），弹簧绕它摆 */
+    this.ahoPivot = ahoBox ? [ahoBox.x1 - 0.006, ahoBox.y0 + 0.010] : null;
 
     /* 2. 相邻且混合模式 + 掩码集合 + 动态性都相同的部件并成一个 run；
           被「不透明度覆盖」命中的部件单独成 run（绘制时要单独调 alpha） */
@@ -467,10 +509,11 @@
       else if ((useB & 2) && (d.flags[i] & 2)) bl = 2;
       var dyn = (d.dynSet && d.dynSet[i]) ? 1 : 0;
       var cov = covered && covered.has(i) ? i : -1;
-      var key = bl + '|' + dyn + '|' + cov + '|' + d.masks[i].join(',');
+      var msk = (ahoSet && ahoSet[i]) ? [] : d.masks[i];
+      var key = bl + '|' + dyn + '|' + cov + '|' + msk.join(',');
       var last = runs[runs.length - 1];
       if (last && last.key === key) last.items.push(i);
-      else runs.push({ key: key, blend: bl, dyn: dyn, masks: d.masks[i].slice(), items: [i] });
+      else runs.push({ key: key, blend: bl, dyn: dyn, masks: msk.slice(), items: [i] });
     }
 
     /* 3. 展开成非索引三角流，交错 [x, y, u, v, a] / 20 字节，全部从缓冲 0 偏移开始。
@@ -579,34 +622,6 @@
     }
     if (total === 0) { x0 = y0 = 0; x1 = 3000; y1 = 4500; }
     this.box = { x0: x0, x1: x1, y0: y0, y1: y1, w: x1 - x0, h: y1 - y0 };
-
-    /* 6. 呆毛包围盒：帽子左上那撮悬浮卷发（x 在中线左侧、贴近模型顶部的独立小部件）。
-          用于顶点着色器里的弹簧摆动；找不到就置 null（摆动权重恒 0）。 */
-    var aho = null;
-    var cxHalf = (x0 + x1) / 2, yGate = y0 + (y1 - y0) * 0.88;
-    for (k = 0; k < d.N; k++) {
-      if (!d.ic[k] || hide[k]) continue;
-      if (d.vc[k] > 160) continue;
-      var ax0 = 1e9, ax1 = -1e9, ay0 = 1e9, ay1 = -1e9;
-      for (j = 0; j < d.vc[k]; j++) {
-        var vi2 = (d.vOff[k] + j) * 2;
-        var vx = pos[vi2] / KQ, vy = pos[vi2 + 1] / KQ;
-        if (vx < ax0) ax0 = vx; if (vx > ax1) ax1 = vx;
-        if (vy < ay0) ay0 = vy; if (vy > ay1) ay1 = vy;
-      }
-      if (ay0 > yGate && ax1 < cxHalf + 0.05) {
-        if (!aho) aho = { x0: ax0, y0: ay0, x1: ax1, y1: ay1 };
-        else {
-          if (ax0 < aho.x0) aho.x0 = ax0;
-          if (ay0 < aho.y0) aho.y0 = ay0;
-          if (ax1 > aho.x1) aho.x1 = ax1;
-          if (ay1 > aho.y1) aho.y1 = ay1;
-        }
-      }
-    }
-    this.ahoBox = aho;
-    /* 根部在卷发靠近头的一侧（右下角） */
-    this.ahoPivot = aho ? [aho.x1 - 0.006, aho.y0 + 0.010] : null;
     return this;
   };
 
