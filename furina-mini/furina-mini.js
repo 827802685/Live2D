@@ -484,6 +484,7 @@
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
       this.wtex = wt;
       this.wandA = 0; this.wandV = 0;
+      this.wandBase = 0.41;   /* 基础倾角 23.5°，与旧版立绘抠图一致 */
     }
 
     /* ---------- 7. 取景（边界框由 build() 顺带算出） ---------- */
@@ -1163,9 +1164,9 @@
     var gl = this.gl, w = this.wu, b = this.base;
     var idle = this.o.idle !== false;
     var adt = Math.max(0.001, Math.min(0.05, this._dt || 0.016));
-    var tgt = idle
+    var tgt = (idle
       ? Math.sin(time * 0.8) * 0.030 + Math.sin(time * 1.9 + 1.1) * 0.012 + this.cur.x * 0.10
-      : 0;
+      : 0) + (this.wandBase || 0);
     this.wandV += ((tgt - this.wandA) * 26 - this.wandV * 6.5) * adt;
     this.wandA += this.wandV * adt;
 
