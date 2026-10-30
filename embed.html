@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>嵌入示例 · 芙宁娜 Live2D</title>
+<style>
+  body{margin:0;min-height:100vh;background:#0b1220;color:#dfe8f7;
+    font:15px/1.7 -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:28px}
+  h1{font-size:19px;font-weight:600;margin:0;color:#a9c8ee;letter-spacing:.02em}
+  /* 关键就这一行：给容器一个宽度，剩下的交给组件 */
+  #furina{width:min(60vw,320px)}
+  p{margin:0;color:#5f7395;font-size:12.5px}
+</style>
+</head>
+<body>
+  <h1>三行代码接进任何页面</h1>
+
+  <div id="furina"></div>
+
+  <p>鼠标移动试试，她会看向你</p>
+
+  <script src="./furina-mini/furina-mini.js"></script>
+  <script>
+    FurinaMini.mount('#furina', {
+      base: './furina-mini/',    // 资源目录
+      size: 320           // 初始像素宽（之后由容器宽度接管）
+    });
+  </script>
+</body>
+</html>

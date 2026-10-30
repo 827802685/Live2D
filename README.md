@@ -128,3 +128,26 @@ live2d-furina/
 - 首次加载要下载约 94MB 模型（moc3 91MB + 4K WebP 贴图 2.5MB），会偏慢，属正常；加载框会显示实时进度，之后浏览器缓存会加速。
 - 若看板娘一直不出现，请强刷（Ctrl+Shift+R），并确认 WebGL 已开启；模型大文件能正常下载时最多等待约 90 秒。
 - 控制台出现 `favicon.ico 404` 或一言接口 `429` 均不影响看板娘，可忽略。
+
+---
+
+## FurinaMini：2.06 MB 的精简版（本仓库新增）
+
+根目录 `index.html` 现在展示的是精简版：**95.5 MB 的 moc3 → 2.06 MB**，
+不用 Cubism Core、不引任何运行时库，光栅化是一段手写的 WebGL。
+
+| 文件 | 说明 |
+|---|---|
+| `index.html` | 精简版演示页（原看板娘示例已保留为 `index-widget.html`） |
+| `embed.html` | 最小嵌入示例 |
+| `furina-mini/furina-mini.js` | 渲染器，22 KB，零依赖 |
+| `furina-mini/furina-mesh.bin` | 量化网格 1.32 MB（gzip 780 KB） |
+| `furina-mini/furina-atlas.webp` | 图集 741 KB（1536×1536） |
+
+```html
+<div id="furina" style="width:320px"></div>
+<script src="./furina-mini/furina-mini.js"></script>
+<script>FurinaMini.mount('#furina', { base: './furina-mini/' });</script>
+```
+
+原有的 `model/`、`js/`、`dist/`、`autoload.js` 等文件全部保持原样，未做改动。
