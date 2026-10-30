@@ -21,6 +21,7 @@
   if (q.get('b') != null) opts.forceBlink = parseFloat(q.get('b'));
   if (q.get('e') != null) opts.forceExpr = parseInt(q.get('e'), 10);
   if (q.get('ew') != null) opts.forceExprW = parseFloat(q.get('ew'));
+  if (q.get('near') != null) opts.nearest = true;
   window.__state = 'loading';
   FurinaMini.mount('#f', opts).then(function (m) {
     window.__m = m;

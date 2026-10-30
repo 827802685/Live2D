@@ -16,23 +16,25 @@
     // 位移相加即可叠加（眨眼只动眼睛、表情只动嘴眉），不会互相覆盖。
     'attribute vec2 aBlink;',
     'attribute vec2 aExpr;',
-    'uniform float uTime, uTilt, uBreath, uScale, uAspect, uBlink, uExpr;',
-    'uniform vec2 uCenter, uNeck, uOff, uSway;',
+    'uniform float uTime, uTilt, uBreath, uScale, uAspect, uBlink, uExpr, uAMul;',
+    'uniform vec2 uCenter, uNeck, uOff, uSway, uSkirt, uSkirtAmp, uHalf;',
     'varying vec2 vUv;',
     'varying float vA;',
     'void main(){',
     '  vUv = aUv;',
-    '  vA = aA;',
+    '  vA = aA * uAMul;',
     // 1. 先叠加表情位移
     '  vec2 p = aPos + aBlink * uBlink + aExpr * uExpr;',
     '  p -= uCenter;',
     // clip 空间是非等比的：x 方向要先乘 h/w，才能让两个轴的像素密度一致
     '  p.x *= uAspect;',
     '  p *= uScale;',
-    // 呼吸：纵向缩放，横向轻微反向补偿
-    '  float br = uBreath;',
-    '  p.x *= 1.0 + (br - 1.0) * 0.55;',
-    '  p.y *= br;',
+    // 呼吸：只在胸腔做局部起伏，不动整体尺寸（否则整只模型会「一胀一缩」）
+    '  float chest = smoothstep(uNeck.x - 0.42, uNeck.x - 0.06, aPos.y)',
+    '              * (1.0 - smoothstep(uNeck.x - 0.04, uNeck.x + 0.10, aPos.y));',
+    '  float br = uBreath - 1.0;',
+    '  p.x *= 1.0 + br * 1.5 * chest;',
+    '  p.y += br * 0.55 * (0.35 + 0.65 * chest);',
     // 头部权重：脖子以上逐渐接管
     '  float w = smoothstep(uNeck.x, uNeck.y, aPos.y);',
     '  float neckY = (uNeck.x - uCenter.y) * uScale;',
@@ -41,10 +43,20 @@
     '  float s = sin(a), c = cos(a);',
     '  vec2 d = vec2(p.x, p.y - neckY);',
     '  p = vec2(d.x * c - d.y * s, neckY + d.x * s + d.y * c);',
-    // 发丝 / 裙摆摆动
+    // 发丝摆动：越靠上越明显
     '  float lag = sin(uTime * 1.7 - aPos.y * 2.6) * 0.5 + sin(uTime * 0.9 + aPos.x * 3.1) * 0.5;',
     '  p.x += lag * uSway.x * (0.35 + 0.65 * w) * (0.5 + 0.5 * abs(p.x));',
     '  p.y += lag * uSway.y * 0.4;',
+    // 裙摆飘动：只作用在下半身、且离中线较远的顶点（裙幅），
+    // 腿在中间几乎不动；越往下、越靠外，摆幅越大。
+    '  float skY = clamp((uSkirt.x - aPos.y) / (uSkirt.x - uSkirt.y), 0.0, 1.0);',
+    '  float side = clamp(abs(aPos.x - uCenter.x) / uHalf.x, 0.0, 1.0);',
+    '  float sk = skY * smoothstep(0.50, 1.0, side);',
+    '  float ph = uTime * 1.35;',
+    '  float s1 = sin(ph - aPos.y * 7.0 + aPos.x * 2.0);',
+    '  float s2 = sin(ph * 0.53 + 2.1 - aPos.y * 3.5);',
+    '  p.x += (s1 * 0.72 + s2 * 0.28) * uSkirtAmp.x * sk;',
+    '  p.y += sin(ph - aPos.y * 7.0 + 2.2) * uSkirtAmp.y * sk;',
     // 鼠标跟随
     '  p += uOff * (0.35 + 0.65 * w);',
     '  gl_Position = vec4(p, 0.0, 1.0);',
@@ -79,7 +91,7 @@
   function parse(buf) {
     var dv = new DataView(buf);
     var magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-    if (magic !== 'FUR1' && magic !== 'FUR2' && magic !== 'FUR3') throw new Error('bad magic ' + magic);
+    if (magic !== 'FUR1' && magic !== 'FUR2' && magic !== 'FUR3' && magic !== 'FUR4') throw new Error('bad magic ' + magic);
     var hasFlags = magic !== 'FUR1';
     var o = 4;
     var N = dv.getUint32(o, true); o += 4;
@@ -139,6 +151,25 @@
       anim = new Int16Array(K * dynVerts * 2);
       for (var q2 = 0; q2 < anim.length; q2++) anim[q2] = dv.getInt16(o2 + q2 * 2, true);
       dynSet.dynVerts = dynVerts;
+      o2 += anim.length * 2;
+    }
+
+    /* FUR4 尾块：每帧的部件不透明度覆盖（腮红/嘴型贴图这类「靠透明度切换」的表情） */
+    var opOver = null;
+    if (frameCount > 0 && magic === 'FUR4' && o2 + 1 <= buf.byteLength && dv.getUint8(o2) === 1) {
+      o2 += 1;
+      opOver = new Array(K);
+      for (var f9 = 0; f9 < K; f9++) {
+        var cnt9 = dv.getUint16(o2, true); o2 += 2;
+        if (cnt9) {
+          var mm9 = new Map();
+          for (var k15 = 0; k15 < cnt9; k15++) {
+            var di9 = dv.getUint16(o2, true); o2 += 2;
+            mm9.set(di9, dv.getUint8(o2)); o2 += 1;
+          }
+          opOver[f9] = mm9;
+        }
+      }
     }
 
     return {
@@ -148,7 +179,7 @@
       pos: new Int16Array(buf, posOff, vTot * 2),
       uv: new Uint16Array(buf, uvOff, vTot * 2),
       idx: new Uint16Array(buf, idxOff, iTot),
-      frames: K, dynSet: dynSet, dynSrcOff: dynSrcOff, anim: anim
+      frames: K, dynSet: dynSet, dynSrcOff: dynSrcOff, anim: anim, opOver: opOver
     };
   }
 
@@ -164,7 +195,9 @@
       size: 320,
       follow: true,
       idle: true,
-      dpr: Math.min(global.devicePixelRatio || 1, 2),
+      dpr: Math.min(global.devicePixelRatio || 1, 3),   // 上限 3，retina 才不会糊
+      maxPixels: 3200000,  // 画布总像素上限，超了自动降 dpr，避免手机 GPU 吃力
+      draggable: true,     // 可以按住拖动，双击回到原位
       mesh: 'furina-mesh.bin',
       atlas: 'furina-atlas.webp',
       base: '',            // 资源前缀，例如 './dist/'
@@ -227,13 +260,27 @@
     });
   };
 
+  /* 画布像素尺寸：按 CSS 宽 × dpr，超过 maxPixels 就整体等比缩小，
+     保证高分屏够锐、低端机也不至于被填充率拖死。 */
+  Furina.prototype.pixelSize = function (cssW) {
+    var dpr = this.o.dpr || 1;
+    var w = Math.max(1, cssW * dpr), h = w / (this.aspect || 0.6667);
+    var cap = this.o.maxPixels || 3200000;
+    if (w * h > cap) {
+      var k = Math.sqrt(cap / (w * h));
+      w *= k; h *= k;
+    }
+    return [Math.max(1, Math.round(w)), Math.max(1, Math.round(h))];
+  };
+
   Furina.prototype.init = function () {
     var d = this.data, o = this.o, cv = this.cv;
     this.aspect = d.cw / d.ch;
 
     var cssW = o.size || cv.clientWidth || 320;
-    cv.width = Math.round(cssW * o.dpr);
-    cv.height = Math.round(cssW / this.aspect * o.dpr);
+    var px = this.pixelSize(cssW);
+    cv.width = px[0];
+    cv.height = px[1];
 
     var gl = this.gl = cv.getContext('webgl', {
       alpha: true, premultipliedAlpha: false, antialias: true,
@@ -261,7 +308,7 @@
 
     var uu = this.u = {};
     ['uTime', 'uTilt', 'uBreath', 'uScale', 'uAspect', 'uCenter', 'uNeck', 'uOff', 'uSway',
-     'uPremul', 'uBlink', 'uExpr']
+     'uSkirt', 'uSkirtAmp', 'uHalf', 'uPremul', 'uBlink', 'uExpr', 'uAMul']
       .forEach(function (nm) { uu[nm] = gl.getUniformLocation(pr, nm); });
 
     /* ---------- 1. 掩码几何：每个掩码体只烘焙一次，交错 [x,y,u,v,a] ---------- */
@@ -315,7 +362,7 @@
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.img);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); if (o.nearest) { gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST); }
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -328,7 +375,11 @@
       cy: (box.y0 + box.y1) / 2,
       scale: this.fitScale(box),
       neck: y0 + bh * 0.655,
-      neckTop: y0 + bh * 0.735
+      neckTop: y0 + bh * 0.735,
+      /* 裙摆飘动的作用区间：从腰线往下到底部，越靠下摆幅越大 */
+      skirtTop: y0 + bh * 0.58,
+      skirtBottom: y0 + bh * 0.02,
+      halfW: Math.max(0.08, box.w * 0.30)
     };
     this.bbox = box;
 
@@ -341,6 +392,7 @@
     gl.stencilMask(0xFF);
 
     this.bindFollow();   // onMove 内部自己判断 o.follow，开关随时生效
+    this.bindDrag();
     this.bindVisibility();
     this.resize();
   };
@@ -361,10 +413,20 @@
       [984, 985].forEach(function (v) { if (v < d.N) hide[v] = 1; });
     }
 
+    /* 被「不透明度覆盖」命中的部件集合：含默认透明、仅表情时显示的贴片（腮红/眼泪等） */
+    var covered = null;
+    if (d.opOver) {
+      covered = new Set();
+      d.opOver.forEach(function (mm) { if (mm) mm.forEach(function (v, k) { covered.add(k); }); });
+    }
+    this.coveredSet = covered;
+
     var order = [];
     for (k = 0; k < d.N; k++) {
-      if (d.ic[k] > 0 && d.op[k] / 255 >= minA && (o.drawMaskTargets || !d.maskTarget[k]) && !hide[k] &&
-          (o.maxOrder == null || d.ro[k] <= o.maxOrder)) order.push([d.ro[k], k]);
+      var vis = d.ic[k] > 0 && (d.op[k] / 255 >= minA || (covered && covered.has(k)))
+        && (o.drawMaskTargets || !d.maskTarget[k]) && !hide[k]
+        && (o.maxOrder == null || d.ro[k] <= o.maxOrder);
+      if (vis) order.push([d.ro[k], k]);
     }
     var rev = !!o.reverseOrder;
     if (o.sortBy === 'index') {
@@ -373,7 +435,8 @@
       order.sort(function (a, b) { return rev ? b[0] - a[0] : a[0] - b[0]; });
     }
 
-    /* 2. 相邻且混合模式 + 掩码集合 + 动态性都相同的部件并成一个 run */
+    /* 2. 相邻且混合模式 + 掩码集合 + 动态性都相同的部件并成一个 run；
+          被「不透明度覆盖」命中的部件单独成 run（绘制时要单独调 alpha） */
     var runs = [];
     var useB = o.useBlend == null ? 3 : o.useBlend;
     for (n = 0; n < order.length; n++) {
@@ -382,7 +445,8 @@
       if ((useB & 1) && (d.flags[i] & 1)) bl = 1;
       else if ((useB & 2) && (d.flags[i] & 2)) bl = 2;
       var dyn = (d.dynSet && d.dynSet[i]) ? 1 : 0;
-      var key = bl + '|' + dyn + '|' + d.masks[i].join(',');
+      var cov = covered && covered.has(i) ? i : -1;
+      var key = bl + '|' + dyn + '|' + cov + '|' + d.masks[i].join(',');
       var last = runs[runs.length - 1];
       if (last && last.key === key) last.items.push(i);
       else runs.push({ key: key, blend: bl, dyn: dyn, masks: d.masks[i].slice(), items: [i] });
@@ -416,7 +480,9 @@
         i = run.items[j];
         run.itemPos.push(p); itemStart.push(p); itemId.push(i);
         io2 = d.iOff[i]; c = d.ic[i];
-        var av = o.flat ? 1 : d.op[i] / 255;
+        /* 被 opacity 覆盖的部件：alpha 烘 1，实际透明度由 uAMul 统一给出
+           （这些部件基准透明度可能是 0，比如默认隐藏的腮红/眼泪贴片） */
+        var av = (covered && covered.has(i)) ? 1 : (o.flat ? 1 : d.op[i] / 255);
         var dOff = d.dynSet ? d.dynSrcOff[i] : 0;
         for (k = 0; k < c; k++) {
           var lv = idx[io2 + k];
@@ -466,6 +532,7 @@
     this.runMaskOff = new Int32Array(rc + 1);
     this.runBlend = new Uint8Array(rc);
     this.runDyn0 = new Int32Array(rc);
+    this.runItemId = new Int32Array(rc);
     var maskRef = [], maskCnt = 0;
     for (n = 0; n < rc; n++) {
       this.runV0[n] = runs[n].v0;
@@ -473,6 +540,7 @@
       this.runMaskOff[n] = maskCnt;
       this.runBlend[n] = runs[n].blend;
       this.runDyn0[n] = runs[n].dyn ? runs[n].dyn0 : -1;
+      this.runItemId[n] = covered && covered.has(runs[n].items[0]) ? runs[n].items[0] : -1;
       for (j = 0; j < runs[n].masks.length; j++) {
         m = runs[n].masks[j];
         if (m < d.N && mCount[m] > 0) { maskRef.push(mStart[m], mCount[m]); maskCnt++; }
@@ -512,12 +580,10 @@
 
   Furina.prototype.resize = function () {
     var r = this.el.getBoundingClientRect();
-    var dpr = this.o.dpr;
-    var w = Math.max(1, Math.round((r.width || this.o.size) * dpr));
-    var h = Math.max(1, Math.round(w / this.aspect));
-    if (this.cv.width !== w || this.cv.height !== h) {
-      this.cv.width = w;
-      this.cv.height = h;
+    var px = this.pixelSize(r.width || this.o.size);
+    if (this.cv.width !== px[0] || this.cv.height !== px[1]) {
+      this.cv.width = px[0];
+      this.cv.height = px[1];
     }
     this.cv.style.aspectRatio = String(this.aspect);
   };
@@ -537,6 +603,62 @@
     this.onLeave = function () { self.target.x = 0; self.target.y = 0; };
     global.addEventListener('mousemove', this.onMove, { passive: true });
     document.addEventListener('mouseleave', this.onLeave);
+  };
+
+  /* 按住拖动：跟手移动，松手停在原地，双击回到原位。
+     用 CSS transform 而不是顶点偏移，所以拖动不额外消耗 GPU。 */
+  Furina.prototype.bindDrag = function () {
+    var self = this, el = this.el, cv = this.cv;
+    var drag = this.drag = { x: 0, y: 0 };
+    if (this.o.draggable === false) return;
+
+    var on = false, sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, pid = null;
+    cv.style.touchAction = 'none';
+    cv.style.cursor = 'grab';
+    cv.style.userSelect = 'none';
+    cv.style.webkitUserSelect = 'none';
+    cv.style.webkitTapHighlightColor = 'transparent';
+
+    function apply() {
+      el.style.transform = 'translate3d(' + drag.x.toFixed(1) + 'px,' +
+        drag.y.toFixed(1) + 'px,0)';
+    }
+
+    cv.addEventListener('pointerdown', function (e) {
+      on = true; pid = e.pointerId; moved = 0;
+      sx = e.clientX; sy = e.clientY; ox = drag.x; oy = drag.y;
+      try { cv.setPointerCapture(pid); } catch (x) {}
+      cv.style.cursor = 'grabbing';
+      self.target.x = self.target.y = 0;
+    });
+
+    cv.addEventListener('pointermove', function (e) {
+      if (!on) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+      moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+      var lx = Math.max(120, global.innerWidth * 0.3);
+      var ly = Math.max(120, global.innerHeight * 0.3);
+      drag.x = Math.max(-lx, Math.min(lx, ox + dx));
+      drag.y = Math.max(-ly, Math.min(ly, oy + dy));
+      apply();
+      if (moved > 3) e.preventDefault();
+    });
+
+    function end() {
+      if (!on) return;
+      on = false;
+      cv.style.cursor = 'grab';
+      try { cv.releasePointerCapture(pid); } catch (x) {}
+    }
+    cv.addEventListener('pointerup', end);
+    cv.addEventListener('pointercancel', end);
+
+    cv.addEventListener('dblclick', function () {
+      drag.x = drag.y = 0;
+      el.style.transition = 'transform .45s cubic-bezier(.22,1,.36,1)';
+      apply();
+      setTimeout(function () { el.style.transition = ''; }, 480);
+    });
   };
 
   Furina.prototype.bindVisibility = function () {
@@ -603,7 +725,8 @@
     this.cur.x += (this.target.x - this.cur.x) * e;
     this.cur.y += (this.target.y - this.cur.y) * e;
 
-    if (this.cv.width !== Math.round((this.cv.clientWidth || this.o.size) * this.o.dpr)) this.resize();
+    var cssW = this.cv.clientWidth || this.o.size;
+    if (cssW !== this._lastCssW) { this._lastCssW = cssW; this.resize(); }
     gl.viewport(0, 0, this.cv.width, this.cv.height);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
@@ -669,12 +792,15 @@
     gl.uniform1f(u.uTime, time);
     gl.uniform1f(u.uTilt, -this.cur.x * 0.105);
     gl.uniform1f(u.uBreath, breath);
-    gl.uniform1f(u.uScale, b.scale * breath);
+    gl.uniform1f(u.uScale, b.scale);
     gl.uniform1f(u.uAspect, this.cv.height / this.cv.width);
     gl.uniform2f(u.uCenter, b.cx, b.cy);
     gl.uniform2f(u.uNeck, b.neck, b.neckTop);
     gl.uniform2f(u.uOff, this.cur.x * 0.015, -this.cur.y * 0.010);
-    gl.uniform2f(u.uSway, idle ? 0.0035 : 0, idle ? 0.0018 : 0);
+    gl.uniform2f(u.uSway, idle ? 0.006 : 0, idle ? 0.0026 : 0);
+    gl.uniform2f(u.uSkirt, b.skirtTop, b.skirtBottom);
+    gl.uniform2f(u.uSkirtAmp, idle ? 0.130 : 0, idle ? 0.030 : 0);
+    gl.uniform2f(u.uHalf, b.halfW, 1);
     gl.uniform1f(u.uBlink, 0);
     gl.uniform1f(u.uExpr, 0);
 
@@ -750,11 +876,28 @@
       if (dyn0 >= 0) { gl.uniform1f(u.uBlink, blinkW); gl.uniform1f(u.uExpr, exprW); }
       else { gl.uniform1f(u.uBlink, 0); gl.uniform1f(u.uExpr, 0); }
 
+      /* 不透明度覆盖：表情通过「部件显隐」实现的部分（腮红/嘴型贴图等）。
+         covered 部件的 aA 烘的是 1，uAMul 直接给出目标透明度，随 exprW 插值。 */
+      var am = 1;
+      var di0 = this.runItemId[n];
+      if (di0 >= 0) {
+        var dd = this.data;
+        var baseOp = dd.op[di0] / 255;
+        var tgtOp = baseOp;
+        if (exprW > 0.001) {
+          var mmA = dd.opOver && dd.opOver[EF];
+          if (mmA && mmA.has(di0)) tgtOp = mmA.get(di0) / 255;
+        }
+        am = baseOp + (tgtOp - baseOp) * exprW;
+      }
+      gl.uniform1f(u.uAMul, am);
+
       var bl2 = this.runBlend[n];
       if (bl2 !== this._bl) {
         if (bl2 === 0) {
-          gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-          gl.uniform1f(u.uPremul, 0);
+          /* 图集是预乘 alpha 的：普通模式用 ONE 混合，边缘由预乘插值自然抗锯齿 */
+          gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+          gl.uniform1f(u.uPremul, 1);
         } else if (bl2 === 1) {
           gl.blendFuncSeparate(gl.ONE, gl.ONE, gl.ONE, gl.ONE);
           gl.uniform1f(u.uPremul, 1);
