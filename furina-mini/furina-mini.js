@@ -448,7 +448,7 @@
         + 'uniform float uScale,uAspect,uRot,uWH;'
         + 'varying vec2 vUv;'
         + 'void main(){vUv=aUv;'
-        + 'vec2 p=aPos*vec2(uWH*0.2242,uWH*0.5)-uPiv;'   // 半宽按图 287:640 比例
+        + 'vec2 p=aPos*vec2(uWH*0.0758,uWH*0.5)-uPiv;'   // 半宽按图 97:640 比例
         + 'float c=cos(uRot),s=sin(uRot);'
         + 'p=vec2(p.x*c-p.y*s,p.x*s+p.y*c)+uWPos;'
         + 'p-=uCenter;p.x*=uAspect;p*=uScale;p+=uOff;'
@@ -814,7 +814,7 @@
       wdrag = false;
       var wpt = toWorld(e);
       if (wpt && self.wp && self.o.wand !== false) {
-        var hw = self.wandWH * 0.23 + 0.05, hh = self.wandWH * 0.5 + 0.05;
+        var hw = self.wandWH * 0.076 + 0.05, hh = self.wandWH * 0.5 + 0.05;
         if (Math.abs(wpt[0] - self.wandPos[0]) < hw && Math.abs(wpt[1] - self.wandPos[1]) < hh) {
           wdrag = true;
           wpt0 = [self.wandPos[0], self.wandPos[1]];
