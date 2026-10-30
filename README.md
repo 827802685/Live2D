@@ -9,6 +9,12 @@
 她会呼吸、眨眼、瞟视线、换表情、裙尾飘动——表情用的是**真实采样出来的顶点帧 + 部件透明度**，不是缩放抖动。
 按住模型可以**拖动**，双击回到原位。
 
+**加载策略**：GitHub Pages 国内直连很慢（实测 ~10KB/s），页面会自动按
+「本站 → Cloudflare CDN（testingcf.jsdelivr.net）→ GitHub Pages → jsDelivr」
+的顺序尝试加载，boot 界面实时显示下载百分比；`?line=cdn|jsdelivr|github`
+可强制指定线路。mesh/atlas/wand 三个文件流式统计进度，资源放到哪个目录
+（`furina-mini/` 或 `dist/`）都能自动探测。
+
 | | |
 |---|---|
 | 网格数据 | `furina-mesh.bin` · 1.58 MB（gzip 845 KB） |

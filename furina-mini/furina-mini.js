@@ -257,28 +257,60 @@
   }
 
   Furina.prototype.load = function () {
-    var self = this;
+    var self = this, o = self.o;
+    self._p = {};
+
+    /* 进度汇总：mesh / atlas / wand 三个文件的 (received, total) 累加后回调 */
+    function prog(name, total, got) {
+      self._p[name] = [Math.min(got, total || got), total || got];
+      if (!o.progress) return;
+      var g = 0, t = 0, k;
+      for (k in self._p) { g += self._p[k][0]; t += self._p[k][1]; }
+      try { o.progress(g, t); } catch (e) {}
+    }
+    /* 流式 fetch：边收边报进度（content-length 是 gzip 传输大小，
+       reader 读到的是解压后字节，用 min 钳制保证百分比不超 100） */
+    function fetchBuf(url, name) {
+      return fetch(url).then(function (r) {
+        if (!r.ok) throw new Error(name + ' ' + r.status);
+        var len = +(r.headers.get('content-length') || 0);
+        if (!r.body || !r.body.getReader || !len) {
+          return r.arrayBuffer().then(function (b) { prog(name, b.byteLength, b.byteLength); return b; });
+        }
+        var rd = r.body.getReader(), parts = [], got = 0;
+        function pump() {
+          return rd.read().then(function (x) {
+            if (x.done) {
+              var b = new Uint8Array(got), off = 0;
+              for (var i = 0; i < parts.length; i++) { b.set(parts[i], off); off += parts[i].length; }
+              prog(name, len, got);
+              return b.buffer;
+            }
+            parts.push(x.value); got += x.value.length; prog(name, len, got);
+            return pump();
+          });
+        }
+        return pump();
+      });
+    }
+    function fetchImg(url, name) {
+      return fetchBuf(url, name).then(function (buf) {
+        return new Promise(function (res, rej) {
+          var im = new Image();
+          im.onload = function () { res(im); };
+          im.onerror = function () { rej(new Error(name + ' decode failed')); };
+          im.src = URL.createObjectURL(new Blob([buf]));
+        });
+      });
+    }
+
     return Promise.all([
-      fetch(self.o.base + self.o.mesh).then(function (r) {
-        if (!r.ok) throw new Error('mesh ' + r.status);
-        return r.arrayBuffer();
-      }),
-      new Promise(function (res, rej) {
-        var im = new Image();
-        im.crossOrigin = 'anonymous';
-        im.onload = function () { res(im); };
-        im.onerror = function () { rej(new Error('atlas load failed')); };
-        im.src = self.o.base + self.o.atlas;
-      }),
+      fetchBuf(o.base + o.mesh, 'mesh'),
+      fetchImg(o.base + o.atlas, 'atlas'),
       /* 权杖贴图：加载失败不阻塞主模型（wand 图层只是可选叠加） */
-      new Promise(function (res) {
-        if (self.o.wand === false) return res(null);
-        var im = new Image();
-        im.crossOrigin = 'anonymous';
-        im.onload = function () { res(im); };
-        im.onerror = function () { res(null); };
-        im.src = self.o.base + (self.o.wandTex || 'furina-wand.webp');
-      })
+      o.wand === false
+        ? Promise.resolve(null)
+        : fetchImg(o.base + (o.wandTex || 'furina-wand.webp'), 'wand').catch(function () { return null; })
     ]).then(function (res) {
       self.data = parse(res[0]);
       self.img = res[1];

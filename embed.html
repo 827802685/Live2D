@@ -21,12 +21,28 @@
 
   <p>鼠标移动试试，她会看向你</p>
 
-  <script src="./furina-mini/furina-mini.js"></script>
+  <script src="./dist/furina-mini.js"></script>
   <script>
-    FurinaMini.mount('#furina', {
-      base: './furina-mini/',    // 资源目录
-      size: 320           // 初始像素宽（之后由容器宽度接管）
-    });
+    /* GitHub Pages 上资源在 furina-mini/ 目录；本地/自部署可能在 dist/。
+       静态标签 404 时自动探测两个目录并动态补载脚本。 */
+    (function () {
+      function go(base) {
+        FurinaMini.mount('#furina', {
+          base: base,         // 资源目录
+          size: 320           // 初始像素宽（之后由容器宽度接管）
+        }).catch(function () { boot(); });
+      }
+      if (window.FurinaMini) return go('./dist/');
+      function loadFrom(paths, i) {
+        if (i >= paths.length) return;
+        var s = document.createElement('script');
+        s.src = paths[i] + 'furina-mini.js';
+        s.onload = function () { go(paths[i]); };
+        s.onerror = function () { loadFrom(paths, i + 1); };
+        document.head.appendChild(s);
+      }
+      loadFrom(['./furina-mini/', './dist/'], 0);
+    })();
   </script>
 </body>
 </html>

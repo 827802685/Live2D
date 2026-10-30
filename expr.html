@@ -11,25 +11,37 @@
 </head>
 <body>
 <div id="f"></div>
-<script>document.write('<script src="./furina-mini/furina-mini.js?v='+Date.now()+'"><\/script>');</script>
 <script>
-  var q = new URLSearchParams(location.hash.slice(1));
-  var opts = {
-    base: './furina-mini/', size: 460, follow: false, dpr: 2,
-    idle: q.get('idle') !== '0'
-  };
-  if (q.get('b') != null) opts.forceBlink = parseFloat(q.get('b'));
-  if (q.get('e') != null) opts.forceExpr = parseInt(q.get('e'), 10);
-  if (q.get('ew') != null) opts.forceExprW = parseFloat(q.get('ew'));
-  if (q.get('near') != null) opts.nearest = true;
-  window.__state = 'loading';
-  FurinaMini.mount('#f', opts).then(function (m) {
-    window.__m = m;
-    window.__state = 'ok';
-  }, function (e) {
-    window.__err = String(e && e.stack || e);
-    window.__state = 'err';
-  });
+  /* 动态加载脚本 + 探测资源目录（GitHub Pages 上在 furina-mini/，本地在 dist/） */
+  var __base = './dist/';
+  function __go() {
+    var q = new URLSearchParams(location.hash.slice(1));
+    var opts = {
+      base: __base, size: 460, follow: false, dpr: 2,
+      idle: q.get('idle') !== '0'
+    };
+    if (q.get('b') != null) opts.forceBlink = parseFloat(q.get('b'));
+    if (q.get('e') != null) opts.forceExpr = parseInt(q.get('e'), 10);
+    if (q.get('ew') != null) opts.forceExprW = parseFloat(q.get('ew'));
+    if (q.get('near') != null) opts.nearest = true;
+    window.__state = 'loading';
+    FurinaMini.mount('#f', opts).then(function (m) {
+      window.__m = m;
+      window.__state = 'ok';
+    }, function (e) {
+      window.__err = String(e && e.stack || e);
+      window.__state = 'err';
+    });
+  }
+  if (window.FurinaMini) { __go(); }
+  else (function probe(paths, i) {
+    if (i >= paths.length) { window.__state = 'err'; return; }
+    var s = document.createElement('script');
+    s.src = paths[i] + 'furina-mini.js?v=' + Date.now();
+    s.onload = function () { __base = paths[i]; __go(); };
+    s.onerror = function () { probe(paths, i + 1); };
+    document.head.appendChild(s);
+  })(['./furina-mini/', './dist/'], 0);
 </script>
 </body>
 </html>

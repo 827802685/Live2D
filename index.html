@@ -178,6 +178,7 @@
 (function () {
   var host = document.getElementById('f');
   var boot = document.getElementById('boot');
+  var pEl = boot.querySelector('p');
 
   /* 宽度跟着视口高度走，保证整只模型不出画 */
   function fit() {
@@ -191,24 +192,83 @@
 
   var t0 = performance.now(), m = null;
 
-  FurinaMini.mount('#f', {
-    size: parseInt(host.style.width, 10) || 420,
-    base: './dist/',
-    frames: ['blink', 'eyeLeft', 'eyeRight', 'eyeUp', 'eyeDown',
-             'smile', 'catMouth', 'mouthOpen', 'angry', 'cry', 'blush']
-  })
-    .then(function (model) {
-      m = window.__m = model;
-      document.getElementById('m-t').textContent = Math.round(performance.now() - t0) + ' ms';
-      document.getElementById('m-v').textContent = model.vertCount.toLocaleString('en-US');
-      document.getElementById('m-d').textContent = model.runV0.length;
-      boot.classList.add('done');
-    })
-    .catch(function (e) {
-      boot.innerHTML = '<div style="text-align:center;color:#ff9aa2;font-size:13px;line-height:1.9">' +
-        '加载失败：' + e.message +
-        '<br><span style="color:#5f7395">请用 http(s) 打开，file:// 会被 CORS 挡住</span></div>';
+  /* ---------- 多线路加载：GitHub Pages 国内直连很慢（~10KB/s），
+     jsDelivr 的 Cloudflare 线路实测快 10 倍以上。
+     脚本和资源都在同一目录，所以先动态加载脚本、再把同目录当 base。
+     ?line=cdn|jsdelivr|github 可强制线路，默认自动依次尝试 ---------- */
+  var LINES = [
+    { n: '本站', root: '' },
+    { n: 'Cloudflare CDN', root: 'https://testingcf.jsdelivr.net/gh/827802685/Live2D@master/' },
+    { n: 'GitHub Pages', root: 'https://827802685.github.io/Live2D/' },
+    { n: 'jsDelivr', root: 'https://cdn.jsdelivr.net/gh/827802685/Live2D@master/' }
+  ];
+  /* 同域（本地部署）与仓库目录各备选一个路径，谁的 furina-mini.js 在就用谁 */
+  var CAND = ['furina-mini/furina-mini.js', 'dist/furina-mini.js'];
+
+  var qs = new URLSearchParams(location.search);
+  var forced = qs.get('line');
+  if (forced === 'cdn') LINES.unshift(LINES[1]);
+  else if (forced === 'jsdelivr') LINES.unshift(LINES[3]);
+  else if (forced === 'github') LINES.unshift(LINES[2]);
+
+  function loadScript(url, timeoutMs) {
+    return new Promise(function (res, rej) {
+      var s = document.createElement('script');
+      var done = 0, timer = setTimeout(function () {
+        if (done) return; done = 1; s.remove(); rej(new Error('timeout'));
+      }, timeoutMs || 12000);
+      s.src = url;
+      s.onload = function () { if (done) return; done = 1; clearTimeout(timer); res(); };
+      s.onerror = function () { if (done) return; done = 1; clearTimeout(timer); s.remove(); rej(new Error('load fail')); };
+      document.head.appendChild(s);
     });
+  }
+
+  function bootText(s) { pEl.textContent = s; }
+
+  function bootFail(msg, hint) {
+    boot.innerHTML = '<div style="text-align:center;color:#ff9aa2;font-size:13px;line-height:1.9">' +
+      msg + (hint ? '<br><span style="color:#5f7395">' + hint + '</span>' : '') + '</div>';
+  }
+
+  /* 依次试线路，谁先给出 FurinaMini 就用谁的目录做 base */
+  (function tryLoad(idx) {
+    if (window.FurinaMini) return start();       // 本地直接打开且已同域加载
+    if (idx >= LINES.length * CAND.length) {
+      return bootFail('脚本加载失败', '请检查网络后刷新重试');
+    }
+    var line = LINES[(idx / CAND.length) | 0];
+    var path = CAND[idx % CAND.length];
+    bootText('连接 ' + line.n + ' …');
+    loadScript(line.root + path, line.root ? 14000 : 6000)
+      .then(function () { start(line, path); })
+      .catch(function () { tryLoad(idx + 1); });
+  })(0);
+
+  function start(line, path) {
+    var base = line ? line.root + path.replace(/[^/]*$/, '') : './dist/';
+    FurinaMini.mount('#f', {
+      size: parseInt(host.style.width, 10) || 420,
+      base: base,
+      frames: ['blink', 'eyeLeft', 'eyeRight', 'eyeUp', 'eyeDown',
+               'smile', 'catMouth', 'mouthOpen', 'angry', 'cry', 'blush'],
+      progress: function (got, total) {
+        var pct = total ? Math.min(100, Math.round(got / total * 100)) : 0;
+        bootText('加载模型 ' + pct + '%' + (line ? ' · ' + line.n : ''));
+      }
+    })
+      .then(function (model) {
+        m = window.__m = model;
+        document.getElementById('m-t').textContent = Math.round(performance.now() - t0) + ' ms';
+        document.getElementById('m-v').textContent = model.vertCount.toLocaleString('en-US');
+        document.getElementById('m-d').textContent = model.runV0.length;
+        boot.classList.add('done');
+      })
+      .catch(function (e) {
+        bootFail('加载失败：' + (e && e.message ? e.message : e),
+          '请用 http(s) 打开，file:// 会被 CORS 挡住');
+      });
+  }
 
   /* 控制条：直接改组件开关，不用重建 */
   Array.prototype.forEach.call(document.querySelectorAll('.panel button'), function (b) {
