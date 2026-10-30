@@ -51,6 +51,8 @@
     '  float br = uBreath - 1.0;',
     '  p.x *= 1.0 + br * 1.5 * chest;',
     '  p.y += br * 0.55 * (0.35 + 0.65 * chest);',
+    // 呼吸相位 -1..1（idle 关闭时 uBreath 恒 1 → 相位恒 0）
+    '  float bph = clamp(br / 0.007, -1.0, 1.0);',
     // 头部以脖子为轴倾转（w 已在前面算好）
     '  float neckY = (uNeck.x - uCenter.y) * uScale;',
     // 以脖子为轴倾转头部
@@ -75,6 +77,14 @@
     '  float s2 = sin(ph * 0.53 + 2.1 - aPos.y * 3.5);',
     '  p.x += (s1 * 0.72 + s2 * 0.28) * uSkirtAmp.x * sk;',
     '  p.y += sin(ph - aPos.y * 7.0 + 2.2) * uSkirtAmp.y * sk;',
+    // 裙尾随呼吸轻摆：吸气（bph>0）向观众左侧偏，呼气回来
+    '  p.x += bph * 0.012 * sk;',
+    // 右臂（画面左侧）随呼吸轻抬：胸口扩张 → 肩带手臂微微上浮
+    '  float armW = (1.0 - smoothstep(uNeck.x - 0.02, uNeck.y, aPos.y))',
+    '             * smoothstep(uHip - 0.05, uHip + 0.06, aPos.y)',
+    '             * smoothstep(0.55, 0.85, (uCenter.x - aPos.x) / uHalf.x);',
+    '  p.y += bph * 0.009 * armW;',
+    '  p.x -= bph * 0.005 * armW;',
     // 鼠标跟随
     '  p += uOff * (0.35 + 0.65 * w);',
     '  gl_Position = vec4(p, 0.0, 1.0);',
@@ -229,6 +239,8 @@
       hidePlate: true,     // 隐藏作者在胸口贴的声明牌（drawable 984/985），设 false 可还原
       autoExpr: true,      // 空闲时自动换表情/瞟视线
       autoExprList: null,  // 自动表情的帧索引池，默认 [5,6,10,1,2,3,4,5,8]
+      wand: true,          // 权杖贴图层（原模型没有权杖网格，用官方立绘抠图叠加）
+      wandTex: 'furina-wand.webp',
       maxOrder: null       // 调试：只绘制 renderOrder <= 该值的部件
     }, opts || {});
 
@@ -258,7 +270,7 @@
     var self = this, o = self.o;
     self._p = {};
 
-    /* 进度汇总：mesh / atlas 两个文件的 (received, total) 累加后回调 */
+    /* 进度汇总：mesh / atlas / wand 三个文件的 (received, total) 累加后回调 */
     function prog(name, total, got) {
       self._p[name] = [Math.min(got, total || got), total || got];
       if (!o.progress) return;
@@ -304,10 +316,15 @@
 
     return Promise.all([
       fetchBuf(o.base + o.mesh, 'mesh'),
-      fetchImg(o.base + o.atlas, 'atlas')
+      fetchImg(o.base + o.atlas, 'atlas'),
+      /* 权杖贴图：加载失败不阻塞主模型（wand 图层只是可选叠加） */
+      o.wand === false
+        ? Promise.resolve(null)
+        : fetchImg(o.base + (o.wandTex || 'furina-wand.webp'), 'wand').catch(function () { return null; })
     ]).then(function (res) {
       self.data = parse(res[0]);
       self.img = res[1];
+      self.wandImg = res[2];
       self.init();
       self.ready = true;
       if (self.o.idle) self.start();
@@ -414,7 +431,7 @@
     };
 
     /* ---------- 6. 纹理 ---------- */
-    var tex = gl.createTexture();
+    var tex = this.tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.img);
@@ -423,6 +440,51 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.uniform1i(gl.getUniformLocation(pr, 'uTex'), 0);
+
+    /* ---------- 6.5 权杖贴图层：独立小 program + 一个 quad ---------- */
+    if (this.wandImg && o.wand !== false) {
+      var wvs = 'attribute vec2 aPos;attribute vec2 aUv;'
+        + 'uniform vec2 uCenter,uOff,uWPos,uPiv;'
+        + 'uniform float uScale,uAspect,uRot,uWH;'
+        + 'varying vec2 vUv;'
+        + 'void main(){vUv=aUv;'
+        + 'vec2 p=aPos*vec2(uWH*0.2242,uWH*0.5)-uPiv;'   // 半宽按图 287:640 比例
+        + 'float c=cos(uRot),s=sin(uRot);'
+        + 'p=vec2(p.x*c-p.y*s,p.x*s+p.y*c)+uWPos;'
+        + 'p-=uCenter;p.x*=uAspect;p*=uScale;p+=uOff;'
+        + 'gl_Position=vec4(p,0.,1.);}';
+      var wfs = 'precision mediump float;varying vec2 vUv;'
+        + 'uniform sampler2D uTex;uniform float uAlpha;'
+        + 'void main(){vec4 c=texture2D(uTex,vUv);gl_FragColor=vec4(c.rgb,c.a*uAlpha);}';
+      var wpr = gl.createProgram();
+      gl.attachShader(wpr, compile(gl, gl.VERTEX_SHADER, wvs));
+      gl.attachShader(wpr, compile(gl, gl.FRAGMENT_SHADER, wfs));
+      gl.linkProgram(wpr);
+      this.wp = wpr;
+      var wu = this.wu = {};
+      ['uCenter', 'uOff', 'uWPos', 'uPiv', 'uScale', 'uAspect', 'uRot', 'uWH', 'uTex', 'uAlpha']
+        .forEach(function (nm) { wu[nm] = gl.getUniformLocation(wpr, nm); });
+      wu.aPos = gl.getAttribLocation(wpr, 'aPos');
+      wu.aUv = gl.getAttribLocation(wpr, 'aUv');
+      var wb = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, wb);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+        -1, -1, 0, 0, 1, -1, 1, 0, 1, 1, 1, 1,
+        -1, -1, 0, 0, 1, 1, 1, 1, -1, 1, 0, 1
+      ]), gl.STATIC_DRAW);
+      this.wbuf = wb;
+      var wt = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, wt);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.wandImg);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);   // 必须还原，否则 resize 重传图集会上下颠倒
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      this.wtex = wt;
+      this.wandA = 0; this.wandV = 0;
+    }
 
     /* ---------- 7. 取景（边界框由 build() 顺带算出） ---------- */
     var box = this.box, bh = box.h, y0 = box.y0;
@@ -441,6 +503,14 @@
       halfW: Math.max(0.08, box.w * 0.30)
     };
     this.bbox = box;
+
+    /* 权杖默认落位：立在模型左侧，杖高约为模型高的 58% */
+    if (this.wp) {
+      this.wandWH = bh * 0.58;
+      this.wandPos = [x0c - bw * 0.415, yc0 - bh * 0.02];
+      this.wandPos0 = this.wandPos.slice();
+      this.wandPiv = [0, -0.72];
+    }
 
     gl.disable(gl.DEPTH_TEST);
     gl.enable(gl.BLEND);
@@ -715,6 +785,7 @@
     if (this.o.draggable === false) return;
 
     var on = false, sx = 0, sy = 0, ox = 0, oy = 0, moved = 0, pid = null;
+    var wdrag = false, wpt0 = null, wref = null;
     cv.style.touchAction = 'none';
     cv.style.cursor = 'grab';
     cv.style.userSelect = 'none';
@@ -726,9 +797,30 @@
         drag.y.toFixed(1) + 'px,0)';
     }
 
+    /* 屏幕坐标 → 模型归一化世界坐标（与顶点着色器同一套变换） */
+    function toWorld(e) {
+      var r = cv.getBoundingClientRect();
+      if (!r.width) return null;
+      var ndx = ((e.clientX - r.left) / r.width) * 2 - 1;
+      var ndy = 1 - ((e.clientY - r.top) / r.height) * 2;
+      var sc = self.base.scale, a = self.cv.height / self.cv.width;
+      return [ndx / (sc * a) + self.base.cx, ndy / sc + self.base.cy];
+    }
+
     cv.addEventListener('pointerdown', function (e) {
       on = true; pid = e.pointerId; moved = 0;
       sx = e.clientX; sy = e.clientY; ox = drag.x; oy = drag.y;
+      /* 命中权杖 → 拖杖；否则拖模型（杖跟随） */
+      wdrag = false;
+      var wpt = toWorld(e);
+      if (wpt && self.wp && self.o.wand !== false) {
+        var hw = self.wandWH * 0.23 + 0.05, hh = self.wandWH * 0.5 + 0.05;
+        if (Math.abs(wpt[0] - self.wandPos[0]) < hw && Math.abs(wpt[1] - self.wandPos[1]) < hh) {
+          wdrag = true;
+          wpt0 = [self.wandPos[0], self.wandPos[1]];
+          wref = wpt;
+        }
+      }
       try { cv.setPointerCapture(pid); } catch (x) {}
       cv.style.cursor = 'grabbing';
       self.target.x = self.target.y = 0;
@@ -738,17 +830,33 @@
       if (!on) return;
       var dx = e.clientX - sx, dy = e.clientY - sy;
       moved = Math.max(moved, Math.abs(dx) + Math.abs(dy));
+      if (wdrag) {
+        var wpt = toWorld(e);
+        if (wpt) {
+          self.wandPos[0] = Math.max(-1.5, Math.min(2.5, wpt0[0] + wpt[0] - wref[0]));
+          self.wandPos[1] = Math.max(-1.5, Math.min(2.5, wpt0[1] + wpt[1] - wref[1]));
+        }
+        e.preventDefault();
+        return;
+      }
       var lx = Math.max(120, global.innerWidth * 0.3);
       var ly = Math.max(120, global.innerHeight * 0.3);
       drag.x = Math.max(-lx, Math.min(lx, ox + dx));
       drag.y = Math.max(-ly, Math.min(ly, oy + dy));
       apply();
+      /* 模型拖动时权杖跟着走（CSS 位移对 WebGL 内容无效，直接补世界坐标） */
+      var wpt2 = toWorld(e);
+      if (wpt2 && wref) {
+        self.wandPos[0] += wpt2[0] - wref[0];
+        self.wandPos[1] += wpt2[1] - wref[1];
+        wref = wpt2;
+      }
       if (moved > 3) e.preventDefault();
     });
 
     function end() {
       if (!on) return;
-      on = false;
+      on = false; wdrag = false; wref = null;
       cv.style.cursor = 'grab';
       try { cv.releasePointerCapture(pid); } catch (x) {}
     }
@@ -757,6 +865,7 @@
 
     cv.addEventListener('dblclick', function () {
       drag.x = drag.y = 0;
+      if (self.wandPos0) self.wandPos = self.wandPos0.slice();
       el.style.transition = 'transform .45s cubic-bezier(.22,1,.36,1)';
       apply();
       setTimeout(function () { el.style.transition = ''; }, 480);
@@ -822,6 +931,7 @@
 
     var dt = Math.min(0.05, (t - (this.last || t)) / 1000);
     this.last = t;
+    this._dt = dt;
     var time = (t - this.t0) / 1000;
     var e = 1 - Math.exp(-dt * 5);
     this.cur.x += (this.target.x - this.cur.x) * e;
@@ -966,6 +1076,10 @@
     }
     bindMain(-1, 0);
 
+    /* 权杖画在模型身后（先画 = 被身体遮挡）；不关模板测试，
+       只把 func/op 设成「处处通过、不写入」，后续 run 会各自重设 */
+    this.drawWand(time);
+
     for (var n = 0; n < rc; n++) {
       var m0 = this.runMaskOff[n], m1 = this.runMaskOff[n + 1], r;
       var dyn0 = this.runDyn0[n];
@@ -1041,6 +1155,55 @@
       bindMain(dyn0, this.runV0[n]);
       gl.drawArrays(gl.TRIANGLES, 0, this.runVN[n]);
     }
+  };
+
+  /* 权杖图层：慢速摆动（弹簧跟随头部运动 + 自摆），画在模型身后 */
+  Furina.prototype.drawWand = function (time) {
+    if (!this.wp || this.o.wand === false) return;
+    var gl = this.gl, w = this.wu, b = this.base;
+    var idle = this.o.idle !== false;
+    var adt = Math.max(0.001, Math.min(0.05, this._dt || 0.016));
+    var tgt = idle
+      ? Math.sin(time * 0.8) * 0.030 + Math.sin(time * 1.9 + 1.1) * 0.012 + this.cur.x * 0.10
+      : 0;
+    this.wandV += ((tgt - this.wandA) * 26 - this.wandV * 6.5) * adt;
+    this.wandA += this.wandV * adt;
+
+    gl.useProgram(this.wp);
+    /* 模板安全：处处通过、不写入（不 disable STENCIL_TEST，避免遮罩失效） */
+    gl.stencilFunc(gl.ALWAYS, 0, 0xFF);
+    gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+    gl.disableVertexAttribArray(this.aBlink);
+    gl.disableVertexAttribArray(this.aExpr);
+    gl.enableVertexAttribArray(w.aPos);
+    gl.enableVertexAttribArray(w.aUv);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.wbuf);
+    gl.vertexAttribPointer(w.aPos, 2, gl.FLOAT, false, 16, 0);
+    gl.vertexAttribPointer(w.aUv, 2, gl.FLOAT, false, 16, 8);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.wtex);
+    gl.uniform1i(w.uTex, 0);
+    gl.uniform1f(w.uScale, b.scale);
+    gl.uniform1f(w.uAspect, this.cv.height / this.cv.width);
+    gl.uniform2f(w.uCenter, b.cx, b.cy);
+    gl.uniform2f(w.uOff, this.cur.x * 0.015, -this.cur.y * 0.010);
+    gl.uniform2f(w.uWPos, this.wandPos[0], this.wandPos[1]);
+    gl.uniform2f(w.uPiv, this.wandPiv[0] * this.wandWH * 0.5, this.wandPiv[1] * this.wandWH * 0.5);
+    gl.uniform1f(w.uRot, this.wandA);
+    gl.uniform1f(w.uWH, this.wandWH);
+    gl.uniform1f(w.uAlpha, 1);
+    gl.blendFuncSeparate(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA, gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+
+    /* 恢复主渲染状态：混合每 run 会重设但缓存要作废；图集绑定也要还原 */
+    this._bl = null;
+    gl.bindTexture(gl.TEXTURE_2D, this.tex);
+    gl.useProgram(this.pr);
+  };
+
+  /* 权杖开关：setWand(false) 隐藏贴图层 */
+  Furina.prototype.setWand = function (on) {
+    this.o.wand = !!on;
   };
 
   /* 表情切换：字符串按 o.frames 查表，数字直接当帧索引（0 = 无表情）。
