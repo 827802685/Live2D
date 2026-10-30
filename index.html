@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>芙宁娜 · 2.06 MB 的 Live2D</title>
+<title>芙宁娜 · 2.32 MB 的 Live2D</title>
 <style>
   :root{
     --ink:#eef4ff; --dim:#8ea4c6; --faint:#5f7395;
@@ -78,10 +78,14 @@
     background:radial-gradient(60% 100% at 50% 100%,rgba(150,200,255,.15),transparent 72%);pointer-events:none}
 
   .panel{position:fixed;left:50%;transform:translateX(-50%);bottom:20px;z-index:5;
-    display:flex;align-items:center;gap:4px;padding:5px;border-radius:999px;
+    display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;border-radius:22px;
     background:rgba(12,22,40,.72);border:1px solid var(--line);
     backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
     box-shadow:0 10px 34px rgba(0,0,0,.42)}
+  .panel .row{display:flex;align-items:center;gap:3px;max-width:calc(100vw - 32px);
+    overflow-x:auto;scrollbar-width:none}
+  .panel .row::-webkit-scrollbar{display:none}
+  .panel .row.exp{padding-top:1px;border-top:1px solid rgba(140,185,255,.09)}
   .panel button{appearance:none;border:0;background:transparent;color:var(--faint);
     font:inherit;font-size:12.5px;padding:7px 13px;border-radius:999px;cursor:pointer;
     transition:.16s;white-space:nowrap}
@@ -104,8 +108,10 @@
     .stage{flex:1 1 auto;align-items:flex-end;padding-bottom:clamp(56px,9vh,96px)}
     .wrap{min-height:100%}
     #f{width:min(100vw,440px)}
-    .panel{bottom:14px}
-    .panel button{padding:6px 10px;font-size:11.5px}
+    .panel{bottom:12px;max-width:calc(100vw - 16px)}
+    .panel .row{flex-wrap:nowrap}
+    .panel button{padding:6px 8px;font-size:11.5px}
+    .panel .row.exp button.opt{display:none}
   }
 </style>
 </head>
@@ -115,23 +121,24 @@
 <div class="wrap">
   <div class="copy">
     <div class="tag"><i></i> 零依赖 · 纯 WebGL · 可直接嵌站</div>
-    <h1>芙宁娜<br><em>2.06 MB</em> 的 Live2D</h1>
+    <h1>芙宁娜<br><em>2.32 MB</em> 的 Live2D</h1>
     <p class="sub">
       原模型是一个 <b>95.5 MB</b> 的 <code>moc3</code>，浏览器得先下完才能动。
       这里把它拆成量化网格 + 一张 WebP 图集：<b>不用 Cubism Core，不引任何运行时库</b>，
-      光栅化是一段手写的 WebGL。
+      光栅化是一段手写的 WebGL。<br>
+      眨眼、表情、呼吸、发丝摆动都是<b>真帧数据</b>或顶点着色器算的，她不会僵在原地。
     </p>
 
     <div class="bars">
       <div class="bar"><span>原始 moc3</span><div class="track"><div class="fill old" style="width:100%"></div></div><span>95.5 MB</span></div>
-      <div class="bar"><span>本方案</span><div class="track"><div class="fill new" style="width:2.2%"></div></div><span>2.06 MB</span></div>
+      <div class="bar"><span>本方案</span><div class="track"><div class="fill new" style="width:2.4%"></div></div><span>2.32 MB</span></div>
     </div>
 
     <div class="meta">
-      <div><b id="m-v">188,718</b><i>顶点</i></div>
-      <div><b id="m-d">166</b><i>draw call</i></div>
+      <div><b id="m-v">189,069</b><i>顶点</i></div>
+      <div><b id="m-d">167</b><i>draw call</i></div>
       <div><b id="m-t">—</b><i>解析</i></div>
-      <div><b>45×</b><i>压缩比</i></div>
+      <div><b>41×</b><i>压缩比</i></div>
     </div>
   </div>
 
@@ -143,10 +150,24 @@
 </div>
 
 <div class="panel">
-  <button data-k="follow" class="on">视线跟随</button>
-  <button data-k="idle" class="on">呼吸</button>
-  <button data-k="clip" class="on">裁剪遮罩</button>
-  <button data-k="plate">声明牌</button>
+  <div class="row">
+    <button data-k="follow" class="on">视线跟随</button>
+    <button data-k="idle" class="on">呼吸</button>
+    <button data-k="clip" class="on">裁剪遮罩</button>
+    <button data-k="plate">声明牌</button>
+    <button data-k="auto" class="on">自动表情</button>
+  </div>
+  <div class="row exp">
+    <button data-e="0" class="on">常态</button>
+    <button data-e="5">微笑</button>
+    <button data-e="6" class="opt">猫嘴</button>
+    <button data-e="7">张嘴</button>
+    <button data-e="8">生气</button>
+    <button data-e="9" class="opt">哭</button>
+    <button data-e="10">脸红</button>
+    <button data-e="1">瞟左</button>
+    <button data-e="2">瞟右</button>
+  </div>
 </div>
 
 <div class="boot" id="boot"><div><div class="sp"></div><p>loading</p></div></div>
@@ -171,7 +192,9 @@
 
   FurinaMini.mount('#f', {
     size: parseInt(host.style.width, 10) || 420,
-    base: './furina-mini/'
+    base: './furina-mini/',
+    frames: ['blink', 'eyeLeft', 'eyeRight', 'eyeUp', 'eyeDown',
+             'smile', 'catMouth', 'mouthOpen', 'angry', 'cry', 'blush']
   })
     .then(function (model) {
       m = window.__m = model;
@@ -200,12 +223,26 @@
         if (!on) m.draw(performance.now());
       } else if (k === 'clip') {
         m.o.clip = on;
+      } else if (k === 'auto') {
+        m.o.autoExpr = on;
+        if (!on) m.setExpression(0);
       } else if (k === 'plate') {
         m.o.hidePlate = !on;   // 按钮亮 = 显示声明牌
         m.rebuild();
         document.getElementById('m-v').textContent = m.vertCount.toLocaleString('en-US');
         document.getElementById('m-d').textContent = m.runV0.length;
       }
+    });
+  });
+
+  /* 表情行：手动点选后自动表情暂停表现，由保持时间到点回落 */
+  var chips = document.querySelectorAll('.row.exp button');
+  Array.prototype.forEach.call(chips, function (b) {
+    b.addEventListener('click', function () {
+      if (!m) return;
+      Array.prototype.forEach.call(chips, function (x) { x.classList.remove('on'); });
+      b.classList.add('on');
+      m.setExpression(parseInt(b.dataset.e, 10) || 0, 5000);
     });
   });
 })();

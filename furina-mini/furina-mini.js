@@ -12,14 +12,20 @@
     'attribute vec2 aPos;',
     'attribute vec2 aUv;',
     'attribute float aA;',
-    'uniform float uTime, uTilt, uBreath, uScale, uAspect;',
+    // 多帧以「相对基准姿势的位移」存储：aBlink 是闭眼位移，aExpr 是表情位移。
+    // 位移相加即可叠加（眨眼只动眼睛、表情只动嘴眉），不会互相覆盖。
+    'attribute vec2 aBlink;',
+    'attribute vec2 aExpr;',
+    'uniform float uTime, uTilt, uBreath, uScale, uAspect, uBlink, uExpr;',
     'uniform vec2 uCenter, uNeck, uOff, uSway;',
     'varying vec2 vUv;',
     'varying float vA;',
     'void main(){',
     '  vUv = aUv;',
     '  vA = aA;',
-    '  vec2 p = aPos - uCenter;',
+    // 1. 先叠加表情位移
+    '  vec2 p = aPos + aBlink * uBlink + aExpr * uExpr;',
+    '  p -= uCenter;',
     // clip 空间是非等比的：x 方向要先乘 h/w，才能让两个轴的像素密度一致
     '  p.x *= uAspect;',
     '  p *= uScale;',
@@ -73,8 +79,8 @@
   function parse(buf) {
     var dv = new DataView(buf);
     var magic = String.fromCharCode(dv.getUint8(0), dv.getUint8(1), dv.getUint8(2), dv.getUint8(3));
-    if (magic !== 'FUR1' && magic !== 'FUR2') throw new Error('bad magic ' + magic);
-    var hasFlags = magic === 'FUR2';
+    if (magic !== 'FUR1' && magic !== 'FUR2' && magic !== 'FUR3') throw new Error('bad magic ' + magic);
+    var hasFlags = magic !== 'FUR1';
     var o = 4;
     var N = dv.getUint32(o, true); o += 4;
     var vTot = dv.getUint32(o, true); o += 4;
@@ -82,7 +88,7 @@
     var cw = dv.getFloat32(o, true); o += 4;
     var ch = dv.getFloat32(o, true); o += 4;
     var sy = dv.getFloat32(o, true); o += 4;
-    o += 4;
+    var frameCount = dv.getUint32(o, true); o += 4;     // FUR3 才有值
 
     var vc = new Uint16Array(N), ic = new Uint16Array(N), ro = new Uint16Array(N);
     var op = new Uint8Array(N), flags = new Uint8Array(N);
@@ -114,13 +120,35 @@
     var uvOff = o; o += vTot * 4;
     var idxOff = o;
 
+    /* FUR3 动画扩展：K 帧 × M 个动态 drawable 的顶点绝对位置（int16） */
+    var dynSet = null, anim = null, dynSrcOff = null, K = 0;
+    if (frameCount > 0) {
+      var o2 = idxOff + iTot * 2;
+      K = dv.getUint8(o2); o2 += 1;
+      var M = dv.getUint16(o2, true); o2 += 2;
+      dynSet = new Uint8Array(N);
+      dynSrcOff = new Uint32Array(N);
+      var dynVerts = 0, di;
+      for (i = 0; i < M; i++) {
+        di = dv.getUint16(o2, true); o2 += 2;
+        dynSet[di] = 1;
+        dynSrcOff[di] = dynVerts;
+        dynVerts += vc[di];
+      }
+      /* 源数据可能起始于奇数字节，逐项读，避免 Int16Array 对齐限制 */
+      anim = new Int16Array(K * dynVerts * 2);
+      for (var q2 = 0; q2 < anim.length; q2++) anim[q2] = dv.getInt16(o2 + q2 * 2, true);
+      dynSet.dynVerts = dynVerts;
+    }
+
     return {
       N: N, vTot: vTot, iTot: iTot, cw: cw, ch: ch, sy: sy,
       vc: vc, ic: ic, ro: ro, op: op, flags: flags, vOff: vOff, iOff: iOff,
       masks: masks, maskTarget: maskTarget,
       pos: new Int16Array(buf, posOff, vTot * 2),
       uv: new Uint16Array(buf, uvOff, vTot * 2),
-      idx: new Uint16Array(buf, idxOff, iTot)
+      idx: new Uint16Array(buf, idxOff, iTot),
+      frames: K, dynSet: dynSet, dynSrcOff: dynSrcOff, anim: anim
     };
   }
 
@@ -146,7 +174,10 @@
       flat: false,         // true = 忽略 moc 里遗留的半透明度，一律按不透明绘制
       useBlend: 3,         // 位掩码：1=启用加算 2=启用正片叠底
       drawMaskTargets: true, // 遮罩体本身也要绘制（Cubism 的 mask 是"被谁裁剪"，不是"不画"）
+      frames: null,        // 帧名表，用于 setExpression('smile') 这类字符串调用
       hidePlate: true,     // 隐藏作者在胸口贴的声明牌（drawable 984/985），设 false 可还原
+      autoExpr: true,      // 空闲时自动换表情/瞟视线
+      autoExprList: null,  // 自动表情的帧索引池，默认 [5,6,10,1,2,3,4,5,8]
       maxOrder: null       // 调试：只绘制 renderOrder <= 该值的部件
     }, opts || {});
 
@@ -222,12 +253,15 @@
     this.aPos = gl.getAttribLocation(pr, 'aPos');
     this.aUv = gl.getAttribLocation(pr, 'aUv');
     this.aA = gl.getAttribLocation(pr, 'aA');
+    this.aBlink = gl.getAttribLocation(pr, 'aBlink');
+    this.aExpr = gl.getAttribLocation(pr, 'aExpr');
     gl.enableVertexAttribArray(this.aPos);
     gl.enableVertexAttribArray(this.aUv);
     gl.enableVertexAttribArray(this.aA);
 
     var uu = this.u = {};
-    ['uTime', 'uTilt', 'uBreath', 'uScale', 'uAspect', 'uCenter', 'uNeck', 'uOff', 'uSway', 'uPremul']
+    ['uTime', 'uTilt', 'uBreath', 'uScale', 'uAspect', 'uCenter', 'uNeck', 'uOff', 'uSway',
+     'uPremul', 'uBlink', 'uExpr']
       .forEach(function (nm) { uu[nm] = gl.getUniformLocation(pr, nm); });
 
     /* ---------- 1. 掩码几何：每个掩码体只烘焙一次，交错 [x,y,u,v,a] ---------- */
@@ -339,7 +373,7 @@
       order.sort(function (a, b) { return rev ? b[0] - a[0] : a[0] - b[0]; });
     }
 
-    /* 2. 相邻且混合模式 + 掩码集合都相同的部件并成一个 run */
+    /* 2. 相邻且混合模式 + 掩码集合 + 动态性都相同的部件并成一个 run */
     var runs = [];
     var useB = o.useBlend == null ? 3 : o.useBlend;
     for (n = 0; n < order.length; n++) {
@@ -347,38 +381,64 @@
       var bl = 0;
       if ((useB & 1) && (d.flags[i] & 1)) bl = 1;
       else if ((useB & 2) && (d.flags[i] & 2)) bl = 2;
-      var key = bl + '|' + d.masks[i].join(',');
+      var dyn = (d.dynSet && d.dynSet[i]) ? 1 : 0;
+      var key = bl + '|' + dyn + '|' + d.masks[i].join(',');
       var last = runs[runs.length - 1];
       if (last && last.key === key) last.items.push(i);
-      else runs.push({ key: key, blend: bl, masks: d.masks[i].slice(), items: [i] });
+      else runs.push({ key: key, blend: bl, dyn: dyn, masks: d.masks[i].slice(), items: [i] });
     }
 
-    /* 3. 展开成非索引三角流，交错 [x, y, u, v, a] / 20 字节 */
+    /* 3. 展开成非索引三角流，交错 [x, y, u, v, a] / 20 字节，全部从缓冲 0 偏移开始。
+          动态 drawable 的每一帧另存一份「位移」到独立缓冲，布局 [dx, dy] × K 帧。 */
     var pos = d.pos, uv = d.uv, idx = d.idx, KQ = 32767 / 1.5;
+    var K = d.frames || 0, dynVerts = d.dynSet ? d.dynSet.dynVerts : 0;
     var total = 0, p = 0;
     for (n = 0; n < runs.length; n++) {
       for (j = 0; j < runs[n].items.length; j++) total += d.ic[runs[n].items[j]];
     }
+
+    var DVT = 0;                       // 动态 drawable 展开后的顶点总数
+    for (n = 0; n < runs.length; n++) {
+      if (!runs[n].dyn) continue;
+      for (j = 0; j < runs[n].items.length; j++) DVT += d.ic[runs[n].items[j]];
+    }
+    var hasAnim = !!(K && DVT);
+    var dq = 0;
+
     var bV = new Float32Array(total * 5);
+    var fV = hasAnim ? new Float32Array(K * DVT * 2) : null;
     var itemStart = [], itemCount = [], itemId = [];
 
     for (n = 0; n < runs.length; n++) {
       var run = runs[n];
-      run.v0 = p; run.itemPos = [];
+      run.v0 = p; run.itemPos = []; run.dyn0 = dq;
       for (j = 0; j < run.items.length; j++) {
         i = run.items[j];
         run.itemPos.push(p); itemStart.push(p); itemId.push(i);
         io2 = d.iOff[i]; c = d.ic[i];
         var av = o.flat ? 1 : d.op[i] / 255;
+        var dOff = d.dynSet ? d.dynSrcOff[i] : 0;
         for (k = 0; k < c; k++) {
-          var vi = (idx[io2 + k] + d.vOff[i]) * 2, b5 = p * 5;
-          bV[b5] = pos[vi] / KQ;
-          bV[b5 + 1] = pos[vi + 1] / KQ;
+          var lv = idx[io2 + k];
+          var vi = (lv + d.vOff[i]) * 2, b5 = p * 5;
+          var bx = pos[vi] / KQ, by = pos[vi + 1] / KQ;
+          bV[b5] = bx;
+          bV[b5 + 1] = by;
           bV[b5 + 2] = uv[vi] / 65535;
           bV[b5 + 3] = uv[vi + 1] / 65535;
           bV[b5 + 4] = av;
+          if (run.dyn && hasAnim) {
+            var q = dq + k;
+            for (var f = 0; f < K; f++) {
+              var s0 = (f * dynVerts + dOff + lv) * 2;
+              var t2 = (f * DVT + q) * 2;
+              fV[t2] = d.anim[s0] / 32767 * 1.5 - bx;
+              fV[t2 + 1] = d.anim[s0 + 1] / 32767 * 1.5 - by;
+            }
+          }
           p++;
         }
+        if (run.dyn) dq += c;
       }
       run.vn = p - run.v0;
       for (j = 0; j < run.itemPos.length; j++) {
@@ -393,6 +453,11 @@
 
     if (this.bv) gl.deleteBuffer(this.bv);
     this.bv = mkBuf(gl, bV);
+    if (this.fv) { gl.deleteBuffer(this.fv); this.fv = null; }
+    if (hasAnim) this.fv = mkBuf(gl, fV);
+
+    this.dynTotal = DVT;
+    this.frameCount = K;
 
     /* 4. run 表 */
     var rc = runs.length;
@@ -400,12 +465,14 @@
     this.runVN = new Int32Array(rc);
     this.runMaskOff = new Int32Array(rc + 1);
     this.runBlend = new Uint8Array(rc);
+    this.runDyn0 = new Int32Array(rc);
     var maskRef = [], maskCnt = 0;
     for (n = 0; n < rc; n++) {
       this.runV0[n] = runs[n].v0;
       this.runVN[n] = runs[n].vn;
       this.runMaskOff[n] = maskCnt;
       this.runBlend[n] = runs[n].blend;
+      this.runDyn0[n] = runs[n].dyn ? runs[n].dyn0 : -1;
       for (j = 0; j < runs[n].masks.length; j++) {
         m = runs[n].masks[j];
         if (m < d.N && mCount[m] > 0) { maskRef.push(mStart[m], mCount[m]); maskCnt++; }
@@ -543,6 +610,62 @@
     var idle = this.o.idle !== false;
     var breath = idle ? 1 + Math.sin(time * 1.35) * 0.007 : 1;
 
+    /* ---------- 眨眼：3–6 秒一次，90ms 闭合 / 40ms 停留 / 180ms 张开；
+                  约 1/6 概率连眨两下，避免节拍过于规律 ---------- */
+    this._now = t;
+    var blinkW = 0;
+    if (idle && this.frameCount > 0) {
+      if (this._nextBlink == null) this._nextBlink = t + 1200 + Math.random() * 2400;
+      if (t > this._nextBlink) {
+        this._blinkT = t;
+        this._nextBlink = t + (Math.random() < 0.17 ? 240 : 3000 + Math.random() * 3400);
+      }
+      var be = t - (this._blinkT || -1e9);
+      if (be < 0) blinkW = 0;
+      else if (be < 90) blinkW = be / 90;
+      else if (be < 130) blinkW = 1;
+      else if (be < 310) blinkW = 1 - (be - 130) / 180;
+      else blinkW = 0;
+    }
+
+    /* ---------- 表情：自动"触发 → 保持 → 回落"，手动设置走同一条通道 ---------- */
+    if (this._holdUntil && t > this._holdUntil) {
+      this._holdUntil = 0;
+      this.exprWant = 0;
+    }
+    if (idle && this.o.autoExpr !== false && this.frameCount > 1 && this.o.forceExpr == null && !this.exprWant) {
+      if (this._nextExpr == null) this._nextExpr = t + 2000 + Math.random() * 2800;
+      else if (t > this._nextExpr) {
+        var pool = this.o.autoExprList || [5, 6, 10, 1, 2, 3, 4, 5, 8];
+        var pick = pool[(Math.random() * pool.length) | 0] | 0;
+        if (pick > 0 && pick < this.frameCount) {
+          this.exprWant = pick;
+          /* 视线瞟一眼很短，情绪停留久一些 */
+          this._holdUntil = t + (pick <= 4 ? 650 + Math.random() * 550 : 1500 + Math.random() * 1700);
+        }
+        this._nextExpr = t + 2400 + Math.random() * 4200;
+      }
+    }
+
+    /* 切换时先淡出再淡入，避免两帧之间直接跳变 */
+    var want = this.exprWant || 0;
+    if (this.exprFrame == null) this.exprFrame = 0;
+    if (this.exprW == null) this.exprW = 0;
+    if (this.exprFrame !== want) {
+      this.exprW -= dt * 11;
+      if (this.exprW <= 0) { this.exprW = 0; this.exprFrame = want; }
+    } else {
+      var et = want ? 1 : 0;
+      this.exprW += (et - this.exprW) * Math.min(1, dt * 10);
+    }
+    var exprW = this.exprW;
+    /* 调试钩子：强制某一帧，用来逐帧核验 */
+    if (this.o.forceBlink != null) blinkW = +this.o.forceBlink;
+    if (this.o.forceExpr != null) {
+      this.exprFrame = +this.o.forceExpr | 0;
+      exprW = this.o.forceExprW == null ? 1 : +this.o.forceExprW;
+    }
+
     gl.uniform1f(u.uTime, time);
     gl.uniform1f(u.uTilt, -this.cur.x * 0.105);
     gl.uniform1f(u.uBreath, breath);
@@ -552,29 +675,50 @@
     gl.uniform2f(u.uNeck, b.neck, b.neckTop);
     gl.uniform2f(u.uOff, this.cur.x * 0.015, -this.cur.y * 0.010);
     gl.uniform2f(u.uSway, idle ? 0.0035 : 0, idle ? 0.0018 : 0);
+    gl.uniform1f(u.uBlink, 0);
+    gl.uniform1f(u.uExpr, 0);
 
     var AP = this.aPos, AU = this.aUv, AA = this.aA, BUF = this.bv;
+    var AB = this.aBlink, AE = this.aExpr, DYN = this.dynTotal, EF = this.exprFrame;
+    var FV = this.fv, HAS = !!FV;
     var rc = this.runV0.length;
 
-    /* 主几何只有一个 ARRAY_BUFFER，属性指针在这里设一次就够；
-       掩码阶段会临时切到 gv，切换后调用 bindMain() 复位。 */
-    function bindMain() {
+    /* 主几何在 BUF，帧位移在 FV。两组属性的顶点下标基准必须一致：
+       drawArrays 的 first 会叠加到所有属性上，所以这里统一用 first=0，
+       把 run 的起始顶点折进指针偏移里（v0*20）。否则帧属性会错位读到空白区。 */
+    function bindMain(dyn0, v0) {
+      var o20 = v0 * 20;
       gl.enableVertexAttribArray(AP);
       gl.enableVertexAttribArray(AU);
       gl.enableVertexAttribArray(AA);
       gl.bindBuffer(gl.ARRAY_BUFFER, BUF);
-      gl.vertexAttribPointer(AP, 2, gl.FLOAT, false, 20, 0);
-      gl.vertexAttribPointer(AU, 2, gl.FLOAT, false, 20, 8);
-      gl.vertexAttribPointer(AA, 1, gl.FLOAT, false, 20, 16);
+      gl.vertexAttribPointer(AP, 2, gl.FLOAT, false, 20, o20);
+      gl.vertexAttribPointer(AU, 2, gl.FLOAT, false, 20, o20 + 8);
+      gl.vertexAttribPointer(AA, 1, gl.FLOAT, false, 20, o20 + 16);
+      if (HAS && dyn0 >= 0) {
+        gl.enableVertexAttribArray(AB);
+        gl.enableVertexAttribArray(AE);
+        gl.bindBuffer(gl.ARRAY_BUFFER, FV);
+        gl.vertexAttribPointer(AB, 2, gl.FLOAT, false, 8, dyn0 * 8);
+        gl.vertexAttribPointer(AE, 2, gl.FLOAT, false, 8, (EF * DYN + dyn0) * 8);
+      } else {
+        gl.disableVertexAttribArray(AB);
+        gl.disableVertexAttribArray(AE);
+        gl.vertexAttrib2f(AB, 0, 0);
+        gl.vertexAttrib2f(AE, 0, 0);
+      }
     }
-    bindMain();
+    bindMain(-1, 0);
 
     for (var n = 0; n < rc; n++) {
       var m0 = this.runMaskOff[n], m1 = this.runMaskOff[n + 1], r;
+      var dyn0 = this.runDyn0[n];
       var masked = !!(this.o.clip && m1 > m0);
       if (!masked) { m0 = m1 = 0; }
       if (masked) {
-        /* 掩码阶段：只写模板，不写颜色 */
+        /* 掩码阶段：只写模板，不写颜色；帧权重必须归零 */
+        gl.uniform1f(u.uBlink, 0);
+        gl.uniform1f(u.uExpr, 0);
         gl.clear(gl.STENCIL_BUFFER_BIT);
         gl.colorMask(false, false, false, false);
         gl.stencilFunc(gl.ALWAYS, 0, 0xFF);
@@ -589,7 +733,7 @@
         for (r = 0; r < this.maskRef.length / 2; r++) {
           gl.drawArrays(gl.TRIANGLES, this.maskRef[r * 2], this.maskRef[r * 2 + 1]);
         }
-        bindMain();
+        bindMain(dyn0, this.runV0[n]);
         continue;
       }
       for (r = m0; r < m1; r++) {
@@ -602,7 +746,10 @@
         gl.stencilFunc(gl.ALWAYS, 0, 0xFF);
       }
 
-      /* 可见几何 */
+      /* 可见几何：只有动态 run 才吃帧权重，静态 run 权重归零 */
+      if (dyn0 >= 0) { gl.uniform1f(u.uBlink, blinkW); gl.uniform1f(u.uExpr, exprW); }
+      else { gl.uniform1f(u.uBlink, 0); gl.uniform1f(u.uExpr, 0); }
+
       var bl2 = this.runBlend[n];
       if (bl2 !== this._bl) {
         if (bl2 === 0) {
@@ -617,9 +764,35 @@
         }
         this._bl = bl2;
       }
-      if (masked) bindMain();
-      gl.drawArrays(gl.TRIANGLES, this.runV0[n], this.runVN[n]);
+      /* 每个 run 的起始顶点不同，必须逐 run 重设指针（把 v0 折进偏移） */
+      bindMain(dyn0, this.runV0[n]);
+      gl.drawArrays(gl.TRIANGLES, 0, this.runVN[n]);
     }
+  };
+
+  /* 表情切换：字符串按 o.frames 查表，数字直接当帧索引（0 = 无表情）。
+     同时给一个保持时间，到点自动回到常态，避免表情一直挂着。 */
+  Furina.prototype.setExpression = function (v, holdMs) {
+    var want = 0;
+    if (typeof v === 'string') {
+      var i = (this.o.frames || []).indexOf(v);
+      want = i > 0 ? i : 0;
+    } else {
+      want = (v > 0 && v < (this.frameCount || 0)) ? (v | 0) : 0;
+    }
+    this.exprWant = want;
+    this._nextExpr = null;             // 让自动表情重新计时
+    this._holdUntil = want ? (this._now || performance.now()) + (holdMs || 6000) : 0;
+    return this;
+  };
+
+  Furina.prototype.expression = function () {
+    return this.exprWant || 0;
+  };
+
+  Furina.prototype.blink = function () {
+    this._nextBlink = 0;      // 下一次 draw 立即触发
+    return this;
   };
 
   Furina.prototype.destroy = function () {
@@ -639,5 +812,5 @@
     return new Furina(Object.assign({ container: container }, opts || {})).load();
   }
 
-  global.FurinaMini = { mount: mount, version: '2.0.0' };
+  global.FurinaMini = { mount: mount, version: '2.1.0' };
 })(window);

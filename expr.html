@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>帧核验 · FurinaMini</title>
+<style>
+  html,body{margin:0;background:#0d1420;display:flex;align-items:center;justify-content:center;height:100%}
+  #f{width:460px}
+</style>
+</head>
+<body>
+<div id="f"></div>
+<script>document.write('<script src="./furina-mini/furina-mini.js?v='+Date.now()+'"><\/script>');</script>
+<script>
+  var q = new URLSearchParams(location.hash.slice(1));
+  var opts = {
+    base: './furina-mini/', size: 460, follow: false, dpr: 2,
+    idle: q.get('idle') !== '0'
+  };
+  if (q.get('b') != null) opts.forceBlink = parseFloat(q.get('b'));
+  if (q.get('e') != null) opts.forceExpr = parseInt(q.get('e'), 10);
+  if (q.get('ew') != null) opts.forceExprW = parseFloat(q.get('ew'));
+  window.__state = 'loading';
+  FurinaMini.mount('#f', opts).then(function (m) {
+    window.__m = m;
+    window.__state = 'ok';
+  }, function (e) {
+    window.__err = String(e && e.stack || e);
+    window.__state = 'err';
+  });
+</script>
+</body>
+</html>

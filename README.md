@@ -131,17 +131,19 @@ live2d-furina/
 
 ---
 
-## FurinaMini：2.06 MB 的精简版（本仓库新增）
+## FurinaMini：2.32 MB 的精简版（本仓库新增）
 
-根目录 `index.html` 现在展示的是精简版：**95.5 MB 的 moc3 → 2.06 MB**，
+根目录 `index.html` 现在展示的是精简版：**95.5 MB 的 moc3 → 2.32 MB**，
 不用 Cubism Core、不引任何运行时库，光栅化是一段手写的 WebGL。
+她会呼吸、眨眼、瞟视线、换表情——用的是真实采样出来的顶点帧，不是缩放抖动。
 
 | 文件 | 说明 |
 |---|---|
 | `index.html` | 精简版演示页（原看板娘示例已保留为 `index-widget.html`） |
 | `embed.html` | 最小嵌入示例 |
-| `furina-mini/furina-mini.js` | 渲染器，22 KB，零依赖 |
-| `furina-mini/furina-mesh.bin` | 量化网格 1.32 MB（gzip 780 KB） |
+| `expr.html` | 单帧核验页，`#e=5` 强制第 5 帧、`#b=1` 强制闭眼 |
+| `furina-mini/furina-mini.js` | 渲染器，32 KB，零依赖 |
+| `furina-mini/furina-mesh.bin` | 量化网格 + 11 帧表情位移，1.58 MB（gzip 845 KB） |
 | `furina-mini/furina-atlas.webp` | 图集 741 KB（1536×1536） |
 
 ```html
@@ -149,5 +151,18 @@ live2d-furina/
 <script src="./furina-mini/furina-mini.js"></script>
 <script>FurinaMini.mount('#furina', { base: './furina-mini/' });</script>
 ```
+
+控制表情：
+
+```js
+m.setExpression('smile');   // 或 m.setExpression(5, 4000)
+m.setExpression(0);         // 回到常态
+m.blink();                  // 立刻眨一下
+```
+
+帧索引：0 blink / 1 eyeLeft / 2 eyeRight / 3 eyeUp / 4 eyeDown /
+5 smile / 6 catMouth / 7 mouthOpen / 8 angry / 9 cry / 10 blush。
+空闲时会在表情池里自动挑一个，眼神瞟一眼 0.6–1.2 秒、情绪停 1.5–3.2 秒，
+`autoExpr: false` 可关掉。
 
 原有的 `model/`、`js/`、`dist/`、`autoload.js` 等文件全部保持原样，未做改动。
