@@ -198,11 +198,11 @@
      ?line=cdn|jsdelivr|github 可强制线路，默认自动依次尝试 ---------- */
   var LINES = [
     { n: '本站', root: '' },
-    { n: 'Cloudflare CDN', root: 'https://testingcf.jsdelivr.net/gh/827802685/Live2D@master/' },
+    { n: 'Cloudflare CDN', root: 'https://testingcf.jsdelivr.net/gh/827802685/Live2D@cb47a4f4a40ac3e5ab2b36d5b4676186483f3a2f/' },
     { n: 'GitHub Pages', root: 'https://827802685.github.io/Live2D/' },
-    { n: 'jsDelivr', root: 'https://cdn.jsdelivr.net/gh/827802685/Live2D@master/' }
+    { n: 'jsDelivr', root: 'https://cdn.jsdelivr.net/gh/827802685/Live2D@cb47a4f4a40ac3e5ab2b36d5b4676186483f3a2f/' }
   ];
-  /* CDN 缓存穿透版本号：jsDelivr 对 @master 引用有 ~12h 边缘缓存，
+  /* CDN 缓存穿透版本号：CDN 用 commit SHA 引用（缓存内容永远精确）；发新版后需同步更新 SHA。
      推送新版后 CDN 线路可能还在发旧文件。资源 URL 带上 VER 后，
      新版本号必然 miss 回源拉最新。每次更新 JS 后改一下 VER 即可。 */
   var VER = 'v20261031a';
