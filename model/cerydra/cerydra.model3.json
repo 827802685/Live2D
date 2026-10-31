@@ -1,0 +1,68 @@
+{
+ "Version": 3,
+ "FileReferences": {
+  "Moc": "cerydra.moc3",
+  "Textures": [
+   "cerydra.4096/texture_00.png"
+  ],
+  "Physics": "cerydra.physics3.json",
+  "DisplayInfo": "cerydra.cdi3.json",
+  "Expressions": [
+   {
+    "Name": "Smile",
+    "File": "cerydra.smile.exp3.json"
+   },
+   {
+    "Name": "Sad",
+    "File": "cerydra.sad.exp3.json"
+   },
+   {
+    "Name": "Angry",
+    "File": "cerydra.angry.exp3.json"
+   },
+   {
+    "Name": "Surprised",
+    "File": "cerydra.surprised.exp3.json"
+   }
+  ],
+  "Motions": {
+   "Idle": [
+    {
+     "File": "cerydra.idle.motion3.json"
+    }
+   ],
+   "Blink": [
+    {
+     "File": "cerydra.blink.motion3.json"
+    }
+   ],
+   "Nod": [
+    {
+     "File": "cerydra.nod.motion3.json"
+    }
+   ],
+   "Shake": [
+    {
+     "File": "cerydra.shake.motion3.json"
+    }
+   ]
+  }
+ },
+ "Groups": [
+  {
+   "Target": "Parameter",
+   "Name": "EyeBlink",
+   "Ids": [
+    "ParamEyeLOpen",
+    "ParamEyeROpen"
+   ]
+  },
+  {
+   "Target": "Parameter",
+   "Name": "LipSync",
+   "Ids": [
+    "ParamMouthOpenY"
+   ]
+  }
+ ]
+}

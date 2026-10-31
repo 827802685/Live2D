@@ -4,6 +4,17 @@
 
 > 在线演示：`index.html`（纯静态，根目录即是站点）
 
+## 刻律德菈（Cyrdra）预览
+
+第二个模型已上线：[**kelvdela.html**](https://827802685.github.io/Live2D/kelvdela.html)
+
+- 模型文件在 `model/cerydra/`（官方 Cubism 运行时加载，运行时体积约 1.6 MB，含 4096 贴图 / 26 层 / 28 drawable / 20 参数）
+- 编辑源文件（`.cmo3` + 分层 PSD）在 `model/cerydra/src/`
+- 页面能力：视线跟随（角度参数逐帧驱动）、呼吸、眨眼、发丝物理、4 套表情、点头/摇头动作，支持拖动与双击回位
+- 设置面板复刻自 `dist/config-panel.js`（`dist/kelvdela-panel.js`）：滑块即时生效、localStorage(`kelvdelaConfig`) 持久化、可重置/导出，与芙宁娜面板互不干扰
+
+---
+
 把一个 **95.5 MB** 的 Cubism `moc3` 模型压成能放进网站的 **2.28 MB**，
 **不用 Cubism Core，不引任何运行时库**，光栅化是一段手写的 WebGL。
 她会呼吸、眨眼、瞟视线、换表情、裙尾飘动——表情用的是**真实采样出来的顶点帧 + 部件透明度**，不是缩放抖动。

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>刻律德菈 · Cyrdra Live2D</title>
+<meta name="description" content="刻律德菈（Cyrdra）Live2D 模型在线预览：独立火焰图层、发丝物理、四套表情与动作。">
+<style>
+  :root{
+    --ink:#eef6ff; --dim:#8ea8c6; --faint:#5f7795;
+    --line:rgba(150,195,255,.14);
+    --accent:#8fd4ff; --gold:#ffd08a;
+    --bg0:#050a12; --bg1:#0b1730;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:var(--bg0); color:var(--ink);
+    font:400 15px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased; overflow:hidden;
+  }
+  .bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+    background:
+      radial-gradient(760px 640px at 70% 30%, rgba(60,140,255,.22), transparent 68%),
+      radial-gradient(620px 520px at 22% 82%, rgba(40,90,200,.16), transparent 70%),
+      radial-gradient(420px 380px at 78% 18%, rgba(255,180,90,.07), transparent 72%),
+      linear-gradient(168deg, var(--bg1), var(--bg0) 62%);
+  }
+  .bg::after{content:"";position:absolute;inset:0;opacity:.42;
+    background-image:linear-gradient(rgba(120,170,255,.05) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(120,170,255,.05) 1px,transparent 1px);
+    background-size:64px 64px;
+    mask-image:radial-gradient(72% 62% at 50% 44%,#000 26%,transparent 100%);
+    -webkit-mask-image:radial-gradient(72% 62% at 50% 44%,#000 26%,transparent 100%);
+  }
+
+  .wrap{position:relative;z-index:1;height:100%;display:flex;align-items:stretch;
+    justify-content:center;gap:clamp(8px,3vw,72px)}
+  .copy{flex:0 0 clamp(300px,34vw,520px);
+    padding:clamp(24px,6vh,64px) 0 clamp(24px,6vh,64px) clamp(20px,4vw,64px);
+    display:flex;flex-direction:column;justify-content:center;gap:clamp(14px,2.2vh,22px)}
+  .stage{position:relative;flex:0 0 auto;display:flex;align-items:center;
+    justify-content:center;width:clamp(320px,44vw,620px);height:100%}
+  #live2d{position:relative;z-index:1;width:100%;height:100%}
+  #live2d canvas{display:block;width:100%;height:100%}
+
+  .tag{display:inline-flex;align-items:center;gap:9px;align-self:flex-start;
+    padding:6px 13px 6px 10px;border:1px solid var(--line);border-radius:999px;
+    font-size:12.5px;letter-spacing:.04em;color:var(--dim);background:rgba(120,170,255,.045)}
+  .tag i{width:6px;height:6px;border-radius:50%;background:#5ce0b0;
+    box-shadow:0 0 10px #5ce0b0;display:block}
+
+  h1{margin:0;font-size:clamp(27px,3.2vw,44px);line-height:1.14;font-weight:650;letter-spacing:-.02em}
+  h1 em{font-style:normal;
+    background:linear-gradient(96deg,#9fdcff,#ffd8a0 62%,#9fdcff);
+    -webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{margin:0;color:var(--dim);max-width:48ch;font-size:14.5px}
+  .sub b{color:var(--ink);font-weight:600}
+  code{font:400 .92em/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+    padding:1px 5px;border-radius:5px;background:rgba(140,185,255,.09);color:#a9c8ee}
+
+  .meta{display:grid;grid-template-columns:repeat(4,auto);gap:clamp(12px,1.8vw,26px);
+    padding-top:6px;justify-content:start}
+  .meta div{display:flex;flex-direction:column;gap:1px}
+  .meta b{font-size:17px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .meta i{font-style:normal;font-size:10.5px;color:var(--faint);letter-spacing:.06em;text-transform:uppercase}
+
+  .keys{display:flex;flex-wrap:wrap;gap:6px;padding-top:2px}
+  .keys span{font-size:11.5px;color:var(--faint);border:1px solid rgba(150,195,255,.10);
+    border-radius:6px;padding:3px 7px;background:rgba(120,170,255,.035)}
+  .keys span b{color:var(--dim);font-weight:600}
+
+  .halo{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
+    width:min(88%,600px);aspect-ratio:1;border-radius:50%;pointer-events:none;
+    background:radial-gradient(closest-side,rgba(90,160,255,.20),transparent 70%);filter:blur(10px)}
+  .glow{position:absolute;left:50%;bottom:0;width:78%;height:32%;transform:translateX(-50%);
+    background:radial-gradient(60% 100% at 50% 100%,rgba(120,190,255,.16),transparent 72%);pointer-events:none}
+
+  .panel{position:fixed;left:50%;transform:translateX(-50%);bottom:16px;z-index:5;
+    display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px;border-radius:20px;
+    background:rgba(9,18,34,.76);border:1px solid var(--line);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    box-shadow:0 10px 34px rgba(0,0,0,.42);max-width:calc(100vw - 24px)}
+  .panel .row{display:flex;align-items:center;gap:3px;max-width:100%;
+    overflow-x:auto;scrollbar-width:none}
+  .panel .row::-webkit-scrollbar{display:none}
+  .panel .row + .row{padding-top:1px;border-top:1px solid rgba(140,185,255,.08)}
+  .panel button{appearance:none;border:0;background:transparent;color:var(--faint);
+    font:inherit;font-size:12.5px;padding:7px 12px;border-radius:999px;cursor:pointer;
+    transition:.16s;white-space:nowrap}
+  .panel button:hover{color:var(--dim);background:rgba(140,185,255,.07)}
+  .panel button.on{color:#08121f;background:linear-gradient(180deg,#cfeaff,#8fd4ff);
+    font-weight:600;box-shadow:0 2px 12px rgba(120,200,255,.32)}
+  .panel .row.act button.on{background:linear-gradient(180deg,#ffe6bf,#ffcf8a);
+    box-shadow:0 2px 12px rgba(255,190,110,.28)}
+  .panel .sep{width:1px;height:16px;background:rgba(140,185,255,.14);margin:0 3px;flex:0 0 auto}
+
+  .boot{position:fixed;inset:0;z-index:20;display:grid;place-items:center;
+    background:var(--bg0);transition:opacity .5s,visibility .5s}
+  .boot.done{opacity:0;visibility:hidden;pointer-events:none}
+  .boot p{margin:0;color:var(--faint);font-size:12px;letter-spacing:.16em;text-transform:uppercase}
+  .boot .sp{width:24px;height:24px;margin:0 auto 16px;border-radius:50%;
+    border:2px solid rgba(140,185,255,.16);border-top-color:var(--accent);
+    animation:spin .7s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+
+  @media (min-width:1100px){
+    /* 给右下角参数面板留位，避免遮住模型 */
+    .wrap{padding-right:clamp(240px,21vw,300px)}
+  }
+  @media (max-width:900px){
+    .wrap{gap:0}
+    .copy{display:none}
+    .stage{flex:1 1 auto;width:100%}
+    .panel{bottom:10px;padding:5px}
+    .panel button{padding:6px 9px;font-size:11.5px}
+  }
+</style>
+</head>
+<body>
+<div class="bg"></div>
+
+<div class="wrap">
+  <div class="copy">
+    <div class="tag"><i></i> 独立火焰图层 · 官方 Cubism 运行时</div>
+    <h1>刻律德菈<br><em>Cyrdra</em> 的 Live2D</h1>
+    <p class="sub">
+      从单张立绘拆出 <b>26 个图层</b>、28 个 drawable、20 个参数。头顶蓝焰是
+      <b>程序化渲染后单独成层</b>，与皇冠分离，可以跟着头一起动。<br>
+      头发由 <b>3 组物理</b>驱动，另有呼吸、视线跟随、4 套表情与点头/摇头动作，全部跑在官方运行时上。
+    </p>
+
+    <div class="meta">
+      <div><b id="m-v">—</b><i>drawable</i></div>
+      <div><b id="m-p">20</b><i>参数</i></div>
+      <div><b id="m-t">—</b><i>解析</i></div>
+      <div><b>4096</b><i>贴图</i></div>
+    </div>
+
+    <div class="keys">
+      <span><b>拖动</b> 移动位置</span>
+      <span><b>双击</b> 回到原位</span>
+      <span><b>⚙</b> 参数面板</span>
+    </div>
+  </div>
+
+  <div class="stage" id="stage">
+    <div class="halo"></div>
+    <div class="glow"></div>
+    <div id="live2d"></div>
+  </div>
+</div>
+
+<div class="panel" id="panel">
+  <div class="row">
+    <button data-k="follow" class="on">视线跟随</button>
+    <button data-k="breath" class="on">呼吸</button>
+    <button data-k="blink" class="on">眨眼</button>
+    <button data-k="physics" class="on">发丝物理</button>
+    <button data-k="idle" class="on">待机动作</button>
+    <div class="sep"></div>
+    <button data-a="Nod">点头</button>
+    <button data-a="Shake">摇头</button>
+  </div>
+  <div class="row exp">
+    <button data-e="" class="on">常态</button>
+    <button data-e="Smile">微笑</button>
+    <button data-e="Sad">难过</button>
+    <button data-e="Angry">生气</button>
+    <button data-e="Surprised">惊讶</button>
+  </div>
+</div>
+
+<div class="boot" id="boot"><div><div class="sp"></div><p id="boot-t">loading</p></div></div>
+
+<script src="./js/pixi.min.js"></script>
+<script src="./js/live2dcubismcore.min.js"></script>
+<script src="./js/cubism4.min.js"></script>
+<script src="./dist/kelvdela-panel.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var MODEL_URL = './model/cerydra/cerydra.model3.json';
+  var host = document.getElementById('live2d');
+  var stage = document.getElementById('stage');
+  var boot = document.getElementById('boot');
+  var bootT = document.getElementById('boot-t');
+
+  var DEF = { angleX: 30, angleY: 30, angleZ: 30, bodyAngleX: 10, deadZone: 0.06 };
+  /* kelvdela-panel.js 先加载：已合并 localStorage 保存值；兜底用 DEF */
+  var cfg = window.__kelvdelaConfig || (window.__kelvdelaConfig = DEF);
+
+  var state = { follow: true, breath: true, blink: true, physics: true, idle: true };
+  var model = null, im = null;
+  var t0 = performance.now();
+
+  /* ---------- 画布 ---------- */
+  var app = new PIXI.Application({
+    width: stage.clientWidth || 480,
+    height: stage.clientHeight || 640,
+    transparent: true,
+    antialias: true,
+    autoStart: true,
+    autoDensity: true,
+    resolution: Math.min(window.devicePixelRatio || 1, 2)
+  });
+  app.view.style.width = '100%';
+  app.view.style.height = '100%';
+  app.view.style.display = 'block';
+  host.appendChild(app.view);
+
+  /* ---------- 指针 ---------- */
+  var ptr = { tx: 0, ty: 0, x: 0, y: 0 };
+  window.addEventListener('pointermove', function (e) {
+    var r = app.view.getBoundingClientRect();
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    /* 以画布为参照：鼠标移到画布边缘时到达满幅 ±1，clamp 防越界 */
+    ptr.tx = Math.max(-1, Math.min(1, (e.clientX - cx) / (r.width * 0.5)));
+    ptr.ty = Math.max(-1, Math.min(1, (e.clientY - cy) / (r.height * 0.5)));
+  }, { passive: true });
+  window.addEventListener('pointerleave', function () { ptr.tx = 0; ptr.ty = 0; });
+
+  /* 垂直软死区：靠近水平线时收成 0，避免高位抖动 */
+  function soften(v, dz) {
+    var a = Math.abs(v);
+    if (a <= dz) return 0;
+    var u = (a - dz) / (1 - dz);
+    return (v < 0 ? -1 : 1) * u * u * (3 - 2 * u);
+  }
+
+  /* ---------- 参数驱动（每帧在 beforeModelUpdate 里落地） ---------- */
+  var lastT = performance.now();
+  function drive() {
+    var now = performance.now();
+    var dt = Math.min(0.05, (now - lastT) / 1000);
+    lastT = now;
+    var k = 1 - Math.pow(0.0005, dt);       // 指数平滑，约 0.12s 时间常数
+    ptr.x += (ptr.tx - ptr.x) * k;
+    ptr.y += (ptr.ty - ptr.y) * k;
+
+    var cm = im.coreModel;
+    var fx = state.follow ? ptr.x : 0;
+    var fy = state.follow ? soften(ptr.y, cfg.deadZone) : 0;
+
+    cm.setParameterValueById('ParamAngleX', fx * cfg.angleX);
+    cm.setParameterValueById('ParamAngleY', -fy * cfg.angleY);   /* 屏幕向下为正，模型 AngleY 正值是仰头，取反 */
+    cm.setParameterValueById('ParamAngleZ', -fx * fy * cfg.angleZ);
+    cm.setParameterValueById('ParamBodyAngleX', fx * cfg.bodyAngleX);
+    cm.setParameterValueById('ParamEyeBallX', fx * 0.85);
+    cm.setParameterValueById('ParamEyeBallY', -fy * 0.6);
+
+    if (!state.breath) cm.setParameterValueById('ParamBreath', 0);
+    if (!state.blink) {
+      cm.setParameterValueById('ParamEyeLOpen', 1);
+      cm.setParameterValueById('ParamEyeROpen', 1);
+    }
+    if (!state.physics) {
+      cm.setParameterValueById('ParamHairFront', 0);
+      cm.setParameterValueById('ParamHairBack', 0);
+    }
+  }
+
+  /* ---------- 布局 ---------- */
+  var baseScale = 1, baseY = 0;
+  function fit() {
+    var w = stage.clientWidth, h = stage.clientHeight;
+    if (!w || !h) return;
+    app.renderer.resize(w, h);
+    if (!model) return;
+    baseScale = Math.min(w / 1180, h / 1180);
+    model.scale.set(baseScale);
+    model.position.set(w / 2, h * 0.5 + baseY);
+  }
+  window.addEventListener('resize', fit);
+
+  /* ---------- 拖动 / 双击回位 ---------- */
+  var drag = null;
+  app.view.style.cursor = 'grab';
+  app.view.addEventListener('pointerdown', function (e) {
+    drag = { x: e.clientX, y: e.clientY, px: model ? model.position.x : 0, py: model ? model.position.y : 0 };
+    app.view.style.cursor = 'grabbing';
+    app.view.setPointerCapture && app.view.setPointerCapture(e.pointerId);
+  });
+  window.addEventListener('pointermove', function (e) {
+    if (!drag || !model) return;
+    model.position.set(drag.px + (e.clientX - drag.x), drag.py + (e.clientY - drag.y));
+  });
+  window.addEventListener('pointerup', function () {
+    if (!drag) return;
+    drag = null;
+    app.view.style.cursor = 'grab';
+  });
+  app.view.addEventListener('dblclick', function () {
+    if (!model) return;
+    fit();
+  });
+
+  /* ---------- 加载 ---------- */
+  bootT.textContent = '连接模型';
+  PIXI.live2d.Live2DModel.from(MODEL_URL, { autoInteract: false })
+    .then(function (m) {
+      model = window.__model = m;
+      im = m.internalModel;
+      m.anchor.set(0.5, 0.5);
+      app.stage.addChild(m);
+      fit();
+
+      /* 关掉内建焦点驱动，角度改由上面 drive() 全权接管 */
+      im.focusController.x = 0;
+      im.focusController.y = 0;
+      im.on('beforeModelUpdate', drive);
+
+      document.getElementById('m-t').textContent = Math.round(performance.now() - t0) + ' ms';
+      var dn = im.coreModel.getDrawableIds ? im.coreModel.getDrawableIds().length : 28;
+      document.getElementById('m-v').textContent = dn;
+
+      im.motionManager.groups.idle = 'Idle';
+      m.motion('Idle', 0, 2);
+      boot.classList.add('done');
+    })
+    .catch(function (e) {
+      boot.innerHTML = '<div style="text-align:center;color:#ff9aa2;font-size:13px;line-height:1.9">' +
+        '模型加载失败<br><span style="color:#5f7795">' + (e && e.message ? e.message : e) + '</span></div>';
+      console.error(e);
+    });
+
+  /* ---------- 开关 ---------- */
+  var IDLE_GROUP = 'Idle';
+  Array.prototype.forEach.call(document.querySelectorAll('.panel button'), function (b) {
+    b.addEventListener('click', function () {
+      var k = b.dataset.k, a = b.dataset.a, ex = b.dataset.e;
+      if (ex !== undefined) {                       // 表情行
+        if (!model) return;
+        Array.prototype.forEach.call(document.querySelectorAll('.row.exp button'), function (x) {
+          x.classList.remove('on');
+        });
+        b.classList.add('on');
+        if (!ex) im.motionManager.expressionManager.resetExpression();
+        else model.expression(ex);
+        return;
+      }
+      if (a) {                                      // 动作按钮：点亮 1.2s
+        if (!model) return;
+        model.motion(a, 0, 3);
+        b.classList.add('on');
+        setTimeout(function () { b.classList.remove('on'); }, 1200);
+        return;
+      }
+      if (!k) return;
+      var on = !b.classList.contains('on');
+      b.classList.toggle('on', on);
+      state[k] = on;
+      if (k === 'idle') {
+        if (on) {
+          im.motionManager.groups.idle = IDLE_GROUP;
+          model.motion('Idle', 0, 3);
+        } else {
+          im.motionManager.groups.idle = undefined;
+          im.motionManager.stopAllMotions();
+        }
+      }
+      if (k === 'follow' && !on) { ptr.tx = 0; ptr.ty = 0; }
+    });
+  });
+})();
+</script>
+</body>
+</html>
