@@ -505,10 +505,10 @@
     };
     this.bbox = box;
 
-    /* 权杖默认落位：立在模型左侧，杖高约为模型高的 58% */
+    /* 权杖默认落位：背在模型身后，杖头从左肩后露出，杖高约为模型高的 58% */
     if (this.wp) {
       this.wandWH = bh * 0.58;
-      this.wandPos = [x0c - bw * 0.415, yc0 - bh * 0.02];
+      this.wandPos = [x0c - bw * 0.10, yc0];
       this.wandPos0 = this.wandPos.slice();
       this.wandPiv = [0, -0.72];
     }
