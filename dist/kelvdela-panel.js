@@ -11,18 +11,19 @@
   window.__kelvdelaPanelLoaded = true;
 
   // 内置默认值（与 kelvdela.html 中 ?? 回退值一致）
+  // 幅度按立绘网格变形安全区标定：全幅 ±30° 会把 psd2live 变形器拉变形
   var DEFAULTS = {
-    angleX: 30,      // 头部水平跟手灵敏度
-    angleY: 30,      // 头部垂直跟手灵敏度
-    angleZ: 30,      // 头部倾斜跟手灵敏度
-    bodyAngleX: 10,  // 身体跟手灵敏度
+    angleX: 18,      // 头部水平跟手灵敏度
+    angleY: 14,      // 头部垂直跟手灵敏度
+    angleZ: 18,      // 头部倾斜跟手灵敏度（实际峰值再乘 0.4）
+    bodyAngleX: 5,   // 身体跟手灵敏度
     deadZone: 0.06   // 垂直软死区（仰角越小越抑制抖动）
   };
 
-  // 读取当前配置：localStorage > 页面预置 > 内置默认（刷新后保持）
+  // 读取当前配置：localStorage(v2) > 页面预置 > 内置默认（刷新后保持）
   function ensureConfig() {
     var saved = null;
-    try { saved = JSON.parse(localStorage.getItem('kelvdelaConfig') || 'null'); } catch (e) {}
+    try { saved = JSON.parse(localStorage.getItem('kelvdelaConfigV2') || 'null'); } catch (e) {}
     var base = JSON.parse(JSON.stringify(saved || window.__kelvdelaConfig || DEFAULTS));
     for (var k in DEFAULTS) if (!(k in base) || typeof base[k] !== 'number') base[k] = DEFAULTS[k];
     window.__kelvdelaConfig = base;
@@ -92,7 +93,7 @@
     input.addEventListener('input', function () {
       var v = parseFloat(input.value);
       config[f.key] = v;
-      try { localStorage.setItem('kelvdelaConfig', JSON.stringify(config)); } catch (e) {}
+      try { localStorage.setItem('kelvdelaConfigV2', JSON.stringify(config)); } catch (e) {}
       val.textContent = formatVal(f, v);
     });
     row.appendChild(input);
@@ -131,7 +132,7 @@
   }
   actions.appendChild(mkBtn('重置', function () {
     Object.keys(DEFAULTS).forEach(function (k) { config[k] = DEFAULTS[k]; });
-    try { localStorage.removeItem('kelvdelaConfig'); } catch (e) {}
+    try { localStorage.removeItem('kelvdelaConfigV2'); localStorage.removeItem('kelvdelaConfig'); } catch (e) {}
     FIELDS.forEach(function (f) {
       var b = sliders[f.key]; b.input.value = DEFAULTS[f.key]; b.val.textContent = formatVal(f, DEFAULTS[f.key]);
     });

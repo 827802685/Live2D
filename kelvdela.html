@@ -187,11 +187,11 @@
   var boot = document.getElementById('boot');
   var bootT = document.getElementById('boot-t');
 
-  var DEF = { angleX: 30, angleY: 30, angleZ: 30, bodyAngleX: 10, deadZone: 0.06 };
+  var DEF = { angleX: 18, angleY: 14, angleZ: 18, bodyAngleX: 5, deadZone: 0.06 };
   /* kelvdela-panel.js 先加载：已合并 localStorage 保存值；兜底用 DEF */
   var cfg = window.__kelvdelaConfig || (window.__kelvdelaConfig = DEF);
 
-  var state = { follow: true, breath: true, blink: true, physics: true, idle: true };
+  var state = { follow: true, breath: true, blink: true, physics: true, idle: true, expr: null };
   var model = null, im = null;
   var t0 = performance.now();
 
@@ -229,6 +229,14 @@
     return (v < 0 ? -1 : 1) * u * u * (3 - 2 * u);
   }
 
+  /* 平方缓动：常用行程内幅度温和，只有贴近画布边缘才到满幅，
+     避免 psd2live 九宫格变形器在 ±30° 全幅下把立绘网格拉变形 */
+  function ease(v) { return v * Math.abs(v); }
+
+  /* 表情激活时接管眼睛开合（待机动作的眨眼曲线会盖过表情） */
+  var EXPR_EYE = { Smile: 0.75, Sad: 0.9, Angry: 0.55, Surprised: 1 };
+  var EXPR_EYEBALL_Y = { Smile: 0, Sad: -0.4, Angry: 0, Surprised: 0 };
+
   /* ---------- 参数驱动（每帧在 beforeModelUpdate 里落地） ---------- */
   var lastT = performance.now();
   function drive() {
@@ -240,18 +248,25 @@
     ptr.y += (ptr.ty - ptr.y) * k;
 
     var cm = im.coreModel;
-    var fx = state.follow ? ptr.x : 0;
-    var fy = state.follow ? soften(ptr.y, cfg.deadZone) : 0;
+    var fx = state.follow ? ease(ptr.x) : 0;
+    var fy = state.follow ? ease(soften(ptr.y, cfg.deadZone)) : 0;
 
     cm.setParameterValueById('ParamAngleX', fx * cfg.angleX);
     cm.setParameterValueById('ParamAngleY', -fy * cfg.angleY);   /* 屏幕向下为正，模型 AngleY 正值是仰头，取反 */
-    cm.setParameterValueById('ParamAngleZ', -fx * fy * cfg.angleZ);
+    cm.setParameterValueById('ParamAngleZ', -fx * fy * cfg.angleZ * 0.4);
     cm.setParameterValueById('ParamBodyAngleX', fx * cfg.bodyAngleX);
-    cm.setParameterValueById('ParamEyeBallX', fx * 0.85);
-    cm.setParameterValueById('ParamEyeBallY', -fy * 0.6);
+    cm.setParameterValueById('ParamEyeBallX', fx * 0.6);
+    cm.setParameterValueById('ParamEyeBallY', -fy * 0.45);
+
+    if (state.expr && EXPR_EYE[state.expr] !== undefined) {
+      /* 表情接管眼睛：不受眨眼/待机动作干扰 */
+      cm.setParameterValueById('ParamEyeLOpen', EXPR_EYE[state.expr]);
+      cm.setParameterValueById('ParamEyeROpen', EXPR_EYE[state.expr]);
+      if (EXPR_EYEBALL_Y[state.expr]) cm.setParameterValueById('ParamEyeBallY', EXPR_EYEBALL_Y[state.expr]);
+    }
 
     if (!state.breath) cm.setParameterValueById('ParamBreath', 0);
-    if (!state.blink) {
+    if (!state.blink && !(state.expr && EXPR_EYE[state.expr] !== undefined)) {
       cm.setParameterValueById('ParamEyeLOpen', 1);
       cm.setParameterValueById('ParamEyeROpen', 1);
     }
@@ -336,6 +351,7 @@
           x.classList.remove('on');
         });
         b.classList.add('on');
+        state.expr = ex || null;
         if (!ex) im.motionManager.expressionManager.resetExpression();
         else model.expression(ex);
         return;
