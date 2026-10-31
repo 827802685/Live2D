@@ -18,8 +18,8 @@
     'attribute vec2 aBlink;',
     'attribute vec2 aExpr;',
     'uniform float uTime, uTilt, uBreath, uScale, uAspect, uBlink, uExpr, uAMul, uAhoA, uBody, uHip;',
-    'uniform vec2 uCenter, uNeck, uOff, uSway, uSkirt, uSkirtAmp, uHalf, uAhoP;',
-    'uniform vec4 uAho;',
+    'uniform vec2 uCenter, uNeck, uOff, uSway, uSkirt, uSkirtAmp, uHalf, uAhoP, uGaze;',
+    'uniform vec4 uAho, uEye;',
     'varying vec2 vUv;',
     'varying float vA;',
     'void main(){',
@@ -60,6 +60,10 @@
     '  float s = sin(a), c = cos(a);',
     '  vec2 d = vec2(p.x, p.y - neckY);',
     '  p = vec2(d.x * c - d.y * s, neckY + d.x * s + d.y * c);',
+    // 眼球看向：眼部区域的顶点随视线方向整体小幅平移（边缘 smoothstep 羽化不撕裂脸）
+    '  float ew = smoothstep(uEye.x - 0.05, uEye.x + 0.06, aPos.x) * smoothstep(uEye.z + 0.05, uEye.z - 0.06, aPos.x)',
+    '           * smoothstep(uEye.y - 0.03, uEye.y + 0.05, aPos.y) * smoothstep(uEye.w + 0.03, uEye.w - 0.05, aPos.y);',
+    '  p += uGaze * 0.013 * ew;',
     // 发丝摆动：越靠上越明显
     '  float lag = sin(uTime * 1.7 - aPos.y * 2.6) * 0.5 + sin(uTime * 0.9 + aPos.x * 3.1) * 0.5;',
     '  p.x += lag * uSway.x * (0.35 + 0.65 * w) * (0.5 + 0.5 * abs(p.x));',
@@ -223,7 +227,7 @@
       size: 320,
       follow: true,
       idle: true,
-      dpr: Math.min(global.devicePixelRatio || 1, 3),   // 上限 3，retina 才不会糊
+      dpr: Math.min(global.devicePixelRatio || 1, 2),   // 上限 2：retina 已够清晰，3 的像素量贵 44%
       maxPixels: 3200000,  // 画布总像素上限，超了自动降 dpr，避免手机 GPU 吃力
       draggable: true,     // 可以按住拖动，双击回到原位
       mesh: 'furina-mesh.bin',
@@ -336,7 +340,7 @@
      保证高分屏够锐、低端机也不至于被填充率拖死。 */
   Furina.prototype.pixelSize = function (cssW) {
     var dpr = this.o.dpr || 1;
-    var w = Math.max(1, cssW * dpr), h = w / (this.aspect || 0.6667);
+    var w = Math.max(1, cssW * dpr * (this.q || 1)), h = w / (this.aspect || 0.6667);
     var cap = this.o.maxPixels || 3200000;
     if (w * h > cap) {
       var k = Math.sqrt(cap / (w * h));
@@ -381,7 +385,7 @@
     var uu = this.u = {};
     ['uTime', 'uTilt', 'uBreath', 'uScale', 'uAspect', 'uCenter', 'uNeck', 'uOff', 'uSway',
      'uSkirt', 'uSkirtAmp', 'uHalf', 'uPremul', 'uBlink', 'uExpr', 'uAMul',
-     'uAho', 'uAhoP', 'uAhoA', 'uBody', 'uHip']
+     'uAho', 'uAhoP', 'uAhoA', 'uBody', 'uHip', 'uEye', 'uGaze']
       .forEach(function (nm) { uu[nm] = gl.getUniformLocation(pr, nm); });
 
     /* ---------- 1. 掩码几何：每个掩码体只烘焙一次，交错 [x,y,u,v,a] ---------- */
@@ -501,7 +505,10 @@
       skirtBottom: y0 + bh * 0.33,
       /* 体态摇曳的旋转轴：髋部 */
       hip: y0 + bh * 0.37,
-      halfW: Math.max(0.08, box.w * 0.30)
+      halfW: Math.max(0.08, box.w * 0.30),
+      /* 眼部区域（眼球看向位移的作用范围）：脖子以上、头部中段 */
+      eyeX0: x0c - bw * 0.17, eyeX1: x0c + bw * 0.17,
+      eyeY0: y0 + bh * 0.735, eyeY1: y0 + bh * 0.86
     };
     this.bbox = box;
 
@@ -904,12 +911,49 @@
 
   Furina.prototype.start = function () {
     var self = this;
+    var lastT = 0, acc = 0, cnt = 0, winT = 0;
     function frame(t) {
       self.raf = requestAnimationFrame(frame);
-      if (self.visible === false || self.pageVisible === false) return;
+      if (self.visible === false || self.pageVisible === false) { lastT = t; return; }
+      /* 帧间隔采样：按时间窗口（每秒）评估平均帧时间，
+         低帧率机器上窗口也只占 1 秒，降档不会拖很久 */
+      var dt = t - lastT; lastT = t;
+      if (!winT) winT = t;
+      if (dt > 0.5) { acc += Math.min(dt, 250); cnt++; }
+      if (t - winT >= 1000) {
+        if (cnt >= 3) self.autoPerf(acc / cnt);
+        acc = 0; cnt = 0; winT = t;
+      }
+      /* 帧率上限（降档后省电省 GPU；0 = 不限制） */
+      var iv = self._fiv || 0;
+      if (iv && t - (self._lastDraw || 0) < iv - 1.5) return;
+      self._lastDraw = t;
       self.draw(t);
     }
     this.raf = requestAnimationFrame(frame);
+  };
+
+  /* ---------- 自适应性能：帧时间连续超标就降档（分辨率+帧率），稳定后缓慢升回 ----------
+     L0: 100% 分辨率 60fps   L1: 85% 30fps   L2: 70% 30fps   L3: 55% 24fps
+     降档快（连续 2 个坏窗口 ≈ 2 秒），升档慢（连续 6 个好窗口 + 10 秒冷却） */
+  Furina.prototype.autoPerf = function (avgMs) {
+    var L = this._perfL || 0;
+    if (avgMs > 26) {
+      this._badN = (this._badN || 0) + 1; this._goodN = 0;
+      if (this._badN >= 2 && L < 3) { this._perfL = L + 1; this._badN = 0; this.applyPerf(); }
+    } else if (avgMs < 15) {
+      this._goodN = (this._goodN || 0) + 1; this._badN = 0;
+      var now = performance.now();
+      if (this._goodN >= 6 && L > 0 && now > (this._cool || 0)) {
+        this._perfL = L - 1; this._goodN = 0; this._cool = now + 10000; this.applyPerf();
+      }
+    } else { this._badN = 0; this._goodN = 0; }
+  };
+  Furina.prototype.applyPerf = function () {
+    var L = this._perfL;
+    this.q = [1, 0.85, 0.7, 0.55][L];
+    this._fiv = L === 0 ? 0 : (L >= 3 ? 42 : 33);
+    this.resize();
   };
 
   Furina.prototype.drawPick = function () {
@@ -1034,7 +1078,7 @@
     this._dt = dt;
     var time = (t - this.t0) / 1000;
     this._gtime = time;
-    var e = 1 - Math.exp(-dt * 5);
+    var e = 1 - Math.exp(-dt * 8);
     this.cur.x += (this.target.x - this.cur.x) * e;
     this.cur.y += (this.target.y - this.cur.y) * e;
 
@@ -1139,13 +1183,16 @@
       : nm.body;
 
     gl.uniform1f(u.uTime, time);
-    gl.uniform1f(u.uTilt, -this.cur.x * 0.105 + nm.tilt);
+    gl.uniform1f(u.uTilt, -this.cur.x * 0.16 + nm.tilt);
     gl.uniform1f(u.uBreath, breath);
     gl.uniform1f(u.uScale, b.scale);
     gl.uniform1f(u.uAspect, this.cv.height / this.cv.width);
     gl.uniform2f(u.uCenter, b.cx, b.cy);
     gl.uniform2f(u.uNeck, b.neck, b.neckTop);
-    gl.uniform2f(u.uOff, this.cur.x * 0.015 + nm.offX, -this.cur.y * 0.010 + nm.offY);
+    gl.uniform2f(u.uOff, this.cur.x * 0.026 + nm.offX, -this.cur.y * 0.017 + nm.offY);
+    /* 眼球看向：把视线向量传给 shader，只位移眼部区域 */
+    gl.uniform2f(u.uGaze, this.cur.x * 0.85, this.cur.y * 0.6);
+    gl.uniform4f(u.uEye, b.eyeX0, b.eyeY0, b.eyeX1, b.eyeY1);
     gl.uniform2f(u.uSway, idle ? 0.006 : 0, idle ? 0.0026 : 0);
     gl.uniform2f(u.uSkirt, b.skirtTop, b.skirtBottom);
     gl.uniform2f(u.uSkirtAmp, idle ? 0.095 : 0, idle ? 0.016 : 0);
@@ -1309,7 +1356,7 @@
     gl.uniform1f(w.uScale, b.scale);
     gl.uniform1f(w.uAspect, this.cv.height / this.cv.width);
     gl.uniform2f(w.uCenter, b.cx, b.cy);
-    gl.uniform2f(w.uOff, this.cur.x * 0.015, -this.cur.y * 0.010);
+    gl.uniform2f(w.uOff, this.cur.x * 0.026, -this.cur.y * 0.017);
     gl.uniform2f(w.uWPos, this.wandPos[0], this.wandPos[1]);
     gl.uniform2f(w.uPiv, this.wandPiv[0] * this.wandWH * 0.5, this.wandPiv[1] * this.wandWH * 0.5);
     gl.uniform1f(w.uRot, this.wandA);
