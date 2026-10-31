@@ -812,12 +812,15 @@
     cv.addEventListener('pointerdown', function (e) {
       on = true; pid = e.pointerId; moved = 0;
       sx = e.clientX; sy = e.clientY; ox = drag.x; oy = drag.y;
-      /* 命中权杖 → 拖杖；否则拖模型（杖跟随） */
+      /* 命中杖头（露出身体的水晶段）→ 拖杖；否则拖模型（杖跟随）。
+         命中区只取杖上半段，避免身后杖身拦截点在人物身上的点击 */
       wdrag = false;
       var wpt = toWorld(e);
       if (wpt && self.wp && self.o.wand !== false) {
-        var hw = self.wandWH * 0.076 + 0.05, hh = self.wandWH * 0.5 + 0.05;
-        if (Math.abs(wpt[0] - self.wandPos[0]) < hw && Math.abs(wpt[1] - self.wandPos[1]) < hh) {
+        var wh = self.wandWH;
+        var hx = self.wandPos[0] - wh * 0.115, hy = self.wandPos[1] + wh * 0.24;
+        var hw = wh * 0.10 + 0.04, hh = wh * 0.26 + 0.04;
+        if (Math.abs(wpt[0] - hx) < hw && Math.abs(wpt[1] - hy) < hh) {
           wdrag = true;
           wpt0 = [self.wandPos[0], self.wandPos[1]];
           wref = wpt;
@@ -825,6 +828,7 @@
       }
       try { cv.setPointerCapture(pid); } catch (x) {}
       cv.style.cursor = 'grabbing';
+      self._wasWdrag = wdrag;
       self.target.x = self.target.y = 0;
     });
 
@@ -861,6 +865,12 @@
       on = false; wdrag = false; wref = null;
       cv.style.cursor = 'grab';
       try { cv.releasePointerCapture(pid); } catch (x) {}
+      /* 点一下模型（非拖动、非权杖）→ 随机互动反应动作+表情 */
+      if (moved < 6 && !self._wasWdrag) {
+        var pool = ['happy', 'wink', 'shyAct', 'surprise', 'happy', 'angry'];
+        self.react(pool[(Math.random() * pool.length) | 0]);
+      }
+      self._wasWdrag = false;
     }
     cv.addEventListener('pointerup', end);
     cv.addEventListener('pointercancel', end);
@@ -930,20 +940,44 @@
   /* ---------- 自然动作系统：像真人的不规律小动作 ----------
      真人不会匀速循环：呼吸深浅不一、偶尔歪头、重心左右移、深吸一口气。
      这里用一个随机调度器在 4~9s 间隔触发小动作，正弦包络起落，
-     叠加到 tilt/off/body/breath 四个通道上，全部走平滑不跳变。 */
+     叠加到 tilt/off/body/breath 四个通道上，全部走平滑不跳变。
+     部分动作带配套表情（expr），开始时经同一表情通道淡入。 */
   Furina.prototype.natural = function (time, idle) {
     var out = { tilt: 0, offX: 0, offY: 0, body: 0, breath: 0 };
     if (!idle) { this._act = null; return out; }
     if (this._actT == null) this._actT = time + 2.0 + Math.random() * 3.0;
     if (time > this._actT) {
-      var pool = ['tiltL', 'tiltR', 'tiltL', 'tiltR', 'shiftL', 'shiftR', 'shiftL', 'shiftR', 'nod', 'sigh', 'swayBig'];
+      var pool = [
+        { n: 'tiltL', w: 3 }, { n: 'tiltR', w: 3 },
+        { n: 'shiftL', w: 2 }, { n: 'shiftR', w: 2 },
+        { n: 'nod', w: 1.5 }, { n: 'sigh', w: 1.5 },
+        { n: 'swayBig', w: 1.5 },
+        { n: 'stretch', w: 1.2, expr: 0 },
+        { n: 'shake', w: 1.2 },
+        { n: 'bounce', w: 1.0, expr: 5 },
+        { n: 'shy', w: 0.8, expr: 10 },
+        { n: 'lookL', w: 1.2, expr: 1 },
+        { n: 'lookR', w: 1.2, expr: 2 }
+      ];
+      var tot = 0, i;
+      for (i = 0; i < pool.length; i++) tot += pool[i].w;
+      var pick = Math.random() * tot, act = pool[0];
+      for (i = 0; i < pool.length; i++) { pick -= pool[i].w; if (pick <= 0) { act = pool[i]; break; } }
       this._act = {
-        name: pool[(Math.random() * pool.length) | 0],
+        name: act.n,
+        expr: act.expr || 0,
         t0: time,
         dur: 1.1 + Math.random() * 1.5,
         amp: 0.65 + Math.random() * 0.5
       };
-      this._actT = time + this._act.dur + 2.2 + Math.random() * 4.6;
+      if (act.n === 'stretch') this._act.dur = 2.4 + Math.random() * 1.2;
+      if (act.n === 'shake' || act.n === 'shy') this._act.dur = 1.3 + Math.random() * 0.7;
+      if (act.n === 'bounce') this._act.dur = 0.9 + Math.random() * 0.4;
+      if (this._act.expr && this.frameCount > this._act.expr) {
+        this.exprWant = this._act.expr;
+        this._holdUntil = performance.now() + this._act.dur * 1000;
+      }
+      this._actT = time + this._act.dur + 2.0 + Math.random() * 4.2;
     }
     var a = this._act;
     if (a) {
@@ -961,10 +995,34 @@
           case 'nod':    out.offY  = 0.009 * s * Math.sin(Math.PI * Math.min(1, u * 1.6)); break;
           case 'sigh':   out.breath = 0.011 * env; out.body = 0.004 * env; break;
           case 'swayBig': out.body = 0.011 * s * env; out.tilt = 0.032 * s * env; break;
+          case 'stretch': out.breath = 0.020 * env; out.body = 0.007 * env; out.offY = 0.004 * env; out.tilt = 0.02 * env; break;
+          case 'shake':   out.tilt = 0.045 * s * Math.sin(u * Math.PI * 4) * env; break;
+          case 'bounce':  out.offY = 0.012 * s * Math.sin(Math.PI * Math.min(1, u * 2)); out.body = 0.005 * s * env; break;
+          case 'shy':     out.body = 0.007 * s * Math.sin(u * Math.PI * 3) * env; out.tilt = 0.028 * s * env; break;
+          case 'lookL':   out.tilt = 0.02 * s * env; break;
+          case 'lookR':   out.tilt = -0.02 * s * env; break;
         }
       }
     }
     return out;
+  };
+
+  /* 点击互动反应：立即触发一个动作+配套表情，不受调度间隔限制 */
+  Furina.prototype.react = function (name) {
+    var map = {
+      happy:    { n: 'bounce', expr: 5,  dur: 1.0 },
+      surprise: { n: 'bounce', expr: 7,  dur: 1.1 },
+      shyAct:   { n: 'shy',    expr: 10, dur: 1.5 },
+      angry:    { n: 'shake',  expr: 8,  dur: 1.4 },
+      wink:     { n: 'tiltL',  expr: 5,  dur: 1.2 }
+    };
+    var r = map[name] || map.happy;
+    this._act = { name: r.n, expr: r.expr, t0: this._gtime || 0, dur: r.dur, amp: 1.0 };
+    this._actT = (this._gtime || 0) + r.dur + 2.0 + Math.random() * 3.0;
+    if (this.frameCount > r.expr) {
+      this.exprWant = r.expr;
+      this._holdUntil = performance.now() + r.dur * 1000;
+    }
   };
 
   Furina.prototype.draw = function (t) {
@@ -975,6 +1033,7 @@
     this.last = t;
     this._dt = dt;
     var time = (t - this.t0) / 1000;
+    this._gtime = time;
     var e = 1 - Math.exp(-dt * 5);
     this.cur.x += (this.target.x - this.cur.x) * e;
     this.cur.y += (this.target.y - this.cur.y) * e;
