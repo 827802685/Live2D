@@ -359,8 +359,11 @@
     cv.height = px[1];
 
     var gl = this.gl = cv.getContext('webgl', {
-      alpha: true, premultipliedAlpha: false, antialias: true,
-      depth: false, stencil: true
+      alpha: true, premultipliedAlpha: false,
+      /* MSAA 关闭：模型边缘走纹理 alpha+预乘混合抗锯齿，MSAA 对 discard 边缘无效，
+         白白多吃一次全屏多重采样（低端 GPU 上是每帧最大的固定开销之一） */
+      antialias: false, depth: false, stencil: true,
+      powerPreference: 'high-performance'
     });
     if (!gl) throw new Error('no webgl');
 
@@ -414,6 +417,20 @@
     this.maskVerts = mTotal;
     this.mStart = mStart;
     this.mCount = mCount;
+    /* 每个掩码体的静态包围盒（模型空间）——渲染时用它把模板清屏/遮罩绘制
+       裁剪到屏幕上的小块，代替全屏 stencil clear（低端 GPU 省一大截带宽） */
+    var mBox = new Float32Array(d.N * 4);
+    for (i = 0; i < d.N; i++) {
+      if (!d.maskTarget[i] || d.ic[i] === 0) continue;
+      var bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
+      for (k = 0; k < d.ic[i]; k++) {
+        var qx = gV[(mStart[i] + k) * 5], qy = gV[(mStart[i] + k) * 5 + 1];
+        if (qx < bx0) bx0 = qx; if (qx > bx1) bx1 = qx;
+        if (qy < by0) by0 = qy; if (qy > by1) by1 = qy;
+      }
+      mBox[i * 4] = bx0; mBox[i * 4 + 1] = by0; mBox[i * 4 + 2] = bx1; mBox[i * 4 + 3] = by1;
+    }
+    this.maskBox = mBox;
     this.gv = mkBuf(gl, gV);
 
     /* ---------- 2. 可见几何 + run 表（rebuild() 时重算这一段） ---------- */
@@ -632,6 +649,23 @@
       else runs.push({ key: key, blend: bl, dyn: dyn, masks: msk.slice(), items: [i] });
     }
 
+    /* 2.5 二次合并：相邻的「静态 + 无掩码 + 同混合模式 + 都不被 opacity 覆盖」的 run
+          直接并成一个 draw call（动态 run 的帧位移缓冲不连续，不能并）。
+          draw call 数≈run 数，低端机器上驱动开销是大头，这里能砍一半以上 */
+    (function mergeRuns() {
+      var out = [];
+      for (var a = 0; a < runs.length; a++) {
+        var rr = runs[a], L = out[out.length - 1];
+        var covR = covered && covered.has(rr.items[0]);
+        var covL = L && covered && covered.has(L.items[0]);
+        if (L && !rr.dyn && !L.dyn && !rr.masks.length && !L.masks.length &&
+            rr.blend === L.blend && !covR && !covL) {
+          for (var z = 0; z < rr.items.length; z++) L.items.push(rr.items[z]);
+        } else out.push(rr);
+      }
+      runs = out;
+    })();
+
     /* 3. 展开成非索引三角流，交错 [x, y, u, v, a] / 20 字节，全部从缓冲 0 偏移开始。
           动态 drawable 的每一帧另存一份「位移」到独立缓冲，布局 [dx, dy] × K 帧。 */
     var pos = d.pos, uv = d.uv, idx = d.idx, KQ = 32767 / 1.5;
@@ -714,6 +748,7 @@
     this.runDyn0 = new Int32Array(rc);
     this.runItemId = new Int32Array(rc);
     var maskRef = [], maskCnt = 0;
+    this.runBox = new Float32Array(rc * 4);   // 掩码联合包围盒（无掩码 run 填 -1e9）
     for (n = 0; n < rc; n++) {
       this.runV0[n] = runs[n].v0;
       this.runVN[n] = runs[n].vn;
@@ -721,10 +756,20 @@
       this.runBlend[n] = runs[n].blend;
       this.runDyn0[n] = runs[n].dyn ? runs[n].dyn0 : -1;
       this.runItemId[n] = covered && covered.has(runs[n].items[0]) ? runs[n].items[0] : -1;
+      var ub0 = 1e9, ub1 = 1e9, ub2 = -1e9, ub3 = -1e9;
       for (j = 0; j < runs[n].masks.length; j++) {
         m = runs[n].masks[j];
-        if (m < d.N && mCount[m] > 0) { maskRef.push(mStart[m], mCount[m]); maskCnt++; }
+        if (m < d.N && mCount[m] > 0) {
+          maskRef.push(mStart[m], mCount[m]); maskCnt++;
+          if (this.maskBox[m * 4] < ub0) ub0 = this.maskBox[m * 4];
+          if (this.maskBox[m * 4 + 1] < ub1) ub1 = this.maskBox[m * 4 + 1];
+          if (this.maskBox[m * 4 + 2] > ub2) ub2 = this.maskBox[m * 4 + 2];
+          if (this.maskBox[m * 4 + 3] > ub3) ub3 = this.maskBox[m * 4 + 3];
+        }
       }
+      if (ub0 > ub2) { ub0 = ub1 = ub2 = ub3 = -1e9; }
+      this.runBox[n * 4] = ub0; this.runBox[n * 4 + 1] = ub1;
+      this.runBox[n * 4 + 2] = ub2; this.runBox[n * 4 + 3] = ub3;
     }
     this.runMaskOff[rc] = maskCnt;
     this.maskRef = new Int32Array(maskRef);
@@ -933,14 +978,14 @@
     this.raf = requestAnimationFrame(frame);
   };
 
-  /* ---------- 自适应性能：帧时间连续超标就降档（分辨率+帧率），稳定后缓慢升回 ----------
-     L0: 100% 分辨率 60fps   L1: 85% 30fps   L2: 70% 30fps   L3: 55% 24fps
-     降档快（连续 2 个坏窗口 ≈ 2 秒），升档慢（连续 6 个好窗口 + 10 秒冷却） */
+  /* ---------- 自适应性能：帧时间超标就降档（分辨率+帧率），稳定后缓慢升回 ----------
+     L0: 100%/60fps  L1: 85%/30  L2: 70%/30  L3: 60%/30  L4: 50%/30  L5: 40%/24
+     降档快（严重卡顿立即降，轻微卡顿连续 2 个坏窗口），升档慢（6 个好窗口 + 10 秒冷却） */
   Furina.prototype.autoPerf = function (avgMs) {
     var L = this._perfL || 0;
     if (avgMs > 26) {
       this._badN = (this._badN || 0) + 1; this._goodN = 0;
-      if (this._badN >= 2 && L < 3) { this._perfL = L + 1; this._badN = 0; this.applyPerf(); }
+      if (L < 5 && (this._badN >= 2 || avgMs > 45)) { this._perfL = L + 1; this._badN = 0; this.applyPerf(); }
     } else if (avgMs < 15) {
       this._goodN = (this._goodN || 0) + 1; this._badN = 0;
       var now = performance.now();
@@ -951,8 +996,8 @@
   };
   Furina.prototype.applyPerf = function () {
     var L = this._perfL;
-    this.q = [1, 0.85, 0.7, 0.55][L];
-    this._fiv = L === 0 ? 0 : (L >= 3 ? 42 : 33);
+    this.q = [1, 0.85, 0.7, 0.6, 0.5, 0.4][L];
+    this._fiv = L === 0 ? 0 : (L >= 5 ? 42 : 33);
     this.resize();
   };
 
@@ -1246,6 +1291,62 @@
     }
     bindMain(-1, 0);
 
+    /* ---------- scissor 裁剪：掩码清屏/绘制裁到掩码包围盒的屏幕投影 ----------
+       全屏 stencil clear 是低端 GPU 的带宽大头，而掩码只影响自己周围一小块。
+       这里用 JS 复刻顶点变换链（体态/呼吸/头部倾转/发丝摆动/偏移，摆动取 ± 极值），
+       把模型空间包围盒精确投影到当前帧的像素矩形。 */
+    var SC = b.scale, ASP = this.cv.height / this.cv.width, CW = this.cv.width, CH = this.cv.height;
+    var tiltV = -this.cur.x * 0.16 + nm.tilt;
+    var offVX = this.cur.x * 0.026 + nm.offX, offVY = -this.cur.y * 0.017 + nm.offY;
+    var swayVX = idle ? 0.006 : 0;
+    var bodyV = this.bodyA || 0, brV = breath - 1;
+    var RB = this.runBox;
+    function ssN(e0, e1, x) {
+      var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+      return t * t * (3 - 2 * t);
+    }
+    function cornerPx(x, y, sg) {
+      var px = (x - b.cx) * ASP * SC, py = (y - b.cy) * SC;
+      var wb = ssN(b.hip - 0.08, b.hip + 0.08, y);
+      var hipY = (b.hip - b.cy) * SC;
+      var ab2 = bodyV * wb, c2 = Math.cos(ab2), s2 = Math.sin(ab2);
+      var dx = px, dy = py - hipY;
+      px = dx * c2 - dy * s2; py = hipY + dx * s2 + dy * c2;
+      var chest = ssN(b.neck - 0.42, b.neck - 0.06, y) * (1 - ssN(b.neck - 0.04, b.neck + 0.10, y));
+      px *= 1 + brV * 1.5 * chest;
+      py += brV * 0.55 * (0.35 + 0.65 * chest);
+      var w = ssN(b.neck, b.neckTop, y);
+      var a2 = tiltV * w, ca = Math.cos(a2), sa = Math.sin(a2);
+      var neckY = (b.neck - b.cy) * SC;
+      dx = px; dy = py - neckY;
+      px = dx * ca - dy * sa; py = neckY + dx * sa + dy * ca;
+      px += sg * swayVX * (0.35 + 0.65 * w) * (0.5 + 0.5 * Math.abs(px));
+      px += offVX * (0.35 + 0.65 * w);
+      py += offVY * (0.35 + 0.65 * w);
+      return [(px * 0.5 + 0.5) * CW, (py * 0.5 + 0.5) * CH];
+    }
+    function scissorFor(n) {
+      var n4 = n * 4;
+      if (!RB || RB[n4] > RB[n4 + 2]) return false;
+      var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, pt;
+      for (var xi = 0; xi < 2; xi++) for (var yi = 0; yi < 2; yi++) {
+        for (var sg = -1; sg <= 1; sg += 2) {
+          pt = cornerPx(xi ? RB[n4 + 2] : RB[n4], yi ? RB[n4 + 3] : RB[n4 + 1], sg);
+          if (pt[0] < minX) minX = pt[0]; if (pt[0] > maxX) maxX = pt[0];
+          if (pt[1] < minY) minY = pt[1]; if (pt[1] > maxY) maxY = pt[1];
+        }
+      }
+      /* 余量随分辨率缩放：眼部位移是模型空间量（≈0.011 单位），
+         高 DPR 下像素数会放大，固定像素余量会不够 */
+      var pad = Math.max(10, 0.045 * SC * CH * 0.5);
+      minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+      if (minX < 0) minX = 0; if (minY < 0) minY = 0;
+      if (maxX > CW) maxX = CW; if (maxY > CH) maxY = CH;
+      if (maxX - minX < 2 || maxY - minY < 2) return false;
+      gl.scissor(minX, CH - maxY, maxX - minX, maxY - minY);
+      return true;
+    }
+
     /* 权杖画在模型身后（先画 = 被身体遮挡）；不关模板测试，
        只把 func/op 设成「处处通过、不写入」，后续 run 会各自重设 */
     this.drawWand(time);
@@ -1255,6 +1356,8 @@
       var dyn0 = this.runDyn0[n];
       var masked = !!(this.o.clip && m1 > m0);
       if (!masked) { m0 = m1 = 0; }
+      var scOn = masked && !this.o.debugMask && scissorFor(n);
+      if (scOn) gl.enable(gl.SCISSOR_TEST);
       if (masked) {
         /* 掩码阶段：只写模板，不写颜色；帧权重必须归零 */
         gl.uniform1f(u.uBlink, 0);
@@ -1324,6 +1427,7 @@
       /* 每个 run 的起始顶点不同，必须逐 run 重设指针（把 v0 折进偏移） */
       bindMain(dyn0, this.runV0[n]);
       gl.drawArrays(gl.TRIANGLES, 0, this.runVN[n]);
+      if (scOn) gl.disable(gl.SCISSOR_TEST);
     }
   };
 
