@@ -772,6 +772,7 @@
       var dy = (e.clientY - cy) / Math.max(260, global.innerHeight * 0.45);
       self.target.x = Math.max(-1, Math.min(1, dx));
       self.target.y = Math.max(-1, Math.min(1, dy));
+      self._ptrT = performance.now();
     };
     this.onLeave = function () { self.target.x = 0; self.target.y = 0; };
     global.addEventListener('mousemove', this.onMove, { passive: true });
@@ -926,6 +927,46 @@
     }
   };
 
+  /* ---------- 自然动作系统：像真人的不规律小动作 ----------
+     真人不会匀速循环：呼吸深浅不一、偶尔歪头、重心左右移、深吸一口气。
+     这里用一个随机调度器在 4~9s 间隔触发小动作，正弦包络起落，
+     叠加到 tilt/off/body/breath 四个通道上，全部走平滑不跳变。 */
+  Furina.prototype.natural = function (time, idle) {
+    var out = { tilt: 0, offX: 0, offY: 0, body: 0, breath: 0 };
+    if (!idle) { this._act = null; return out; }
+    if (this._actT == null) this._actT = time + 2.0 + Math.random() * 3.0;
+    if (time > this._actT) {
+      var pool = ['tiltL', 'tiltR', 'tiltL', 'tiltR', 'shiftL', 'shiftR', 'shiftL', 'shiftR', 'nod', 'sigh', 'swayBig'];
+      this._act = {
+        name: pool[(Math.random() * pool.length) | 0],
+        t0: time,
+        dur: 1.1 + Math.random() * 1.5,
+        amp: 0.65 + Math.random() * 0.5
+      };
+      this._actT = time + this._act.dur + 2.2 + Math.random() * 4.6;
+    }
+    var a = this._act;
+    if (a) {
+      var u = (time - a.t0) / a.dur;
+      if (u >= 1) this._act = null;
+      else if (u >= 0) {
+        var env = Math.sin(Math.PI * u);
+        env = env * env * (3 - 2 * env);            // 更圆润的起落
+        var s = a.amp;
+        switch (a.name) {
+          case 'tiltL':  out.tilt  = 0.075 * s * env; break;
+          case 'tiltR':  out.tilt  = -0.075 * s * env; break;
+          case 'shiftL': out.offX  = 0.011 * s * env; out.body = 0.009 * s * env; break;
+          case 'shiftR': out.offX  = -0.011 * s * env; out.body = -0.009 * s * env; break;
+          case 'nod':    out.offY  = 0.009 * s * Math.sin(Math.PI * Math.min(1, u * 1.6)); break;
+          case 'sigh':   out.breath = 0.011 * env; out.body = 0.004 * env; break;
+          case 'swayBig': out.body = 0.011 * s * env; out.tilt = 0.032 * s * env; break;
+        }
+      }
+    }
+    return out;
+  };
+
   Furina.prototype.draw = function (t) {
     var gl = this.gl, u = this.u, b = this.base;
     if (!gl || gl.isContextLost()) return;
@@ -938,6 +979,20 @@
     this.cur.x += (this.target.x - this.cur.x) * e;
     this.cur.y += (this.target.y - this.cur.y) * e;
 
+    /* 视线游移：鼠标静止 4 秒后视线自动瞟向别处、偶尔回中，鼠标一动立即恢复跟随 */
+    var idle0 = this.o.idle !== false;
+    if (idle0 && this.o.gaze !== false && (this._ptrT == null || t - this._ptrT > 4000)) {
+      if (this._gzT == null || t > this._gzT) {
+        this._gz = Math.random() < 0.22
+          ? { x: 0, y: 0 }
+          : { x: (Math.random() * 2 - 1) * 0.55, y: (Math.random() * 2 - 1) * 0.45 };
+        this._gzT = t + 1600 + Math.random() * 3400;
+      }
+      var ge = Math.min(1, dt * 1.5);
+      this.target.x += (this._gz.x - this.target.x) * ge;
+      this.target.y += (this._gz.y - this.target.y) * ge;
+    } else if (this._gz) { this._gz = null; this._gzT = null; }
+
     var cssW = this.cv.clientWidth || this.o.size;
     if (cssW !== this._lastCssW) { this._lastCssW = cssW; this.resize(); }
     gl.viewport(0, 0, this.cv.width, this.cv.height);
@@ -945,7 +1000,12 @@
     gl.enable(gl.STENCIL_TEST);
 
     var idle = this.o.idle !== false;
-    var breath = idle ? 1 + Math.sin(time * 1.35) * 0.007 : 1;
+    var nm = this.natural(time, idle);
+    /* 呼吸：双频叠加 + 慢速深浅调制，不再是匀速循环 */
+    var breath = idle
+      ? 1 + (Math.sin(time * 1.35) * 0.0052 + Math.sin(time * 0.47 + 1.9) * 0.0019)
+          * (1 + 0.35 * Math.sin(time * 0.093)) + nm.breath
+      : 1;
 
     /* ---------- 眨眼：3–6 秒一次，90ms 闭合 / 40ms 停留 / 180ms 张开；
                   约 1/6 概率连眨两下，避免节拍过于规律 ---------- */
@@ -1013,17 +1073,20 @@
     if (at > 0.5) at = 0.5; else if (at < -0.5) at = -0.5;
     this.ahoV += (-(this.ahoA - at) * 46 - this.ahoV * 10) * adt;
     this.ahoA += this.ahoV * adt;
-    /* 体态摇曳：绕髋部的缓慢倾斜（腿不动，躯干/手臂/头一起摆） */
-    this.bodyA = idle ? 0.012 * Math.sin(time * 0.85) : 0;
+    /* 体态摇曳：多频叠加 + 随机小动作偏移，绕髋部（腿不动，躯干/手臂/头一起摆） */
+    this.bodyA = idle
+      ? 0.0075 * Math.sin(time * 0.85) + 0.0042 * Math.sin(time * 0.33 + 2.1)
+        + 0.0026 * Math.sin(time * 1.42 + 0.6) + nm.body
+      : nm.body;
 
     gl.uniform1f(u.uTime, time);
-    gl.uniform1f(u.uTilt, -this.cur.x * 0.105);
+    gl.uniform1f(u.uTilt, -this.cur.x * 0.105 + nm.tilt);
     gl.uniform1f(u.uBreath, breath);
     gl.uniform1f(u.uScale, b.scale);
     gl.uniform1f(u.uAspect, this.cv.height / this.cv.width);
     gl.uniform2f(u.uCenter, b.cx, b.cy);
     gl.uniform2f(u.uNeck, b.neck, b.neckTop);
-    gl.uniform2f(u.uOff, this.cur.x * 0.015, -this.cur.y * 0.010);
+    gl.uniform2f(u.uOff, this.cur.x * 0.015 + nm.offX, -this.cur.y * 0.010 + nm.offY);
     gl.uniform2f(u.uSway, idle ? 0.006 : 0, idle ? 0.0026 : 0);
     gl.uniform2f(u.uSkirt, b.skirtTop, b.skirtBottom);
     gl.uniform2f(u.uSkirtAmp, idle ? 0.095 : 0, idle ? 0.016 : 0);
