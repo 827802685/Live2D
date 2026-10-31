@@ -318,13 +318,19 @@
       });
     }
 
+    /* 资源 URL 缓存穿透：o.ver 存在时附加版本参数，
+       让 CDN（jsDelivr @master 有 ~12h 边缘缓存）在新版本发布后立即回源 */
+    function u2(p) {
+      return o.ver ? p + (p.indexOf('?') < 0 ? '?' : '&') + 'v=' + o.ver : p;
+    }
+
     return Promise.all([
-      fetchBuf(o.base + o.mesh, 'mesh'),
-      fetchImg(o.base + o.atlas, 'atlas'),
+      fetchBuf(u2(o.base + o.mesh), 'mesh'),
+      fetchImg(u2(o.base + o.atlas), 'atlas'),
       /* 权杖贴图：加载失败不阻塞主模型（wand 图层只是可选叠加） */
       o.wand === false
         ? Promise.resolve(null)
-        : fetchImg(o.base + (o.wandTex || 'furina-wand.webp'), 'wand').catch(function () { return null; })
+        : fetchImg(u2(o.base + (o.wandTex || 'furina-wand.webp')), 'wand').catch(function () { return null; })
     ]).then(function (res) {
       self.data = parse(res[0]);
       self.img = res[1];
