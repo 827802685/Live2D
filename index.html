@@ -198,14 +198,14 @@
      ?line=cdn|jsdelivr|github 可强制线路，默认自动依次尝试 ---------- */
   var LINES = [
     { n: '本站', root: '' },
-    { n: 'Cloudflare CDN', root: 'https://testingcf.jsdelivr.net/gh/827802685/Live2D@95495ac74a4aba3174afc0dc0af0421627a2431b/' },
+    { n: 'Cloudflare CDN', root: 'https://testingcf.jsdelivr.net/gh/827802685/Live2D@304c024fd4c926f964e6233d2c930c2bda4fb61f/' },
     { n: 'GitHub Pages', root: 'https://827802685.github.io/Live2D/' },
-    { n: 'jsDelivr', root: 'https://cdn.jsdelivr.net/gh/827802685/Live2D@95495ac74a4aba3174afc0dc0af0421627a2431b/' }
+    { n: 'jsDelivr', root: 'https://cdn.jsdelivr.net/gh/827802685/Live2D@304c024fd4c926f964e6233d2c930c2bda4fb61f/' }
   ];
   /* CDN 缓存穿透版本号：CDN 用 commit SHA 引用（缓存内容永远精确）；发新版后需同步更新 SHA。
      推送新版后 CDN 线路可能还在发旧文件。资源 URL 带上 VER 后，
      新版本号必然 miss 回源拉最新。每次更新 JS 后改一下 VER 即可。 */
-  var VER = 'v20261101a';
+  var VER = 'v20261101b';
   /* 同域（本地部署）与仓库目录各备选一个路径，谁的 furina-mini.js 在就用谁 */
   var CAND = ['furina-mini/furina-mini.js', 'dist/furina-mini.js'];
 
