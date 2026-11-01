@@ -53,6 +53,13 @@
     '  p.y += br * 0.55 * (0.35 + 0.65 * chest);',
     // 呼吸相位 -1..1（idle 关闭时 uBreath 恒 1 → 相位恒 0）
     '  float bph = clamp(br / 0.007, -1.0, 1.0);',
+    // 眼球看向：必须在头部倾转「之前」做——眼球是在眼眶里转，眼眶随头转。
+    // 放在 tilt 后（旧写法）等于给已转过的眼睛再叠一个屏幕方向的平移，
+    // 头的倾角和眼珠位移方向会打架，眼珠看起来往脸外滑。
+    // 这里在头部局部坐标系里位移，随后整体随头旋转，天然协调。
+    '  float ew = smoothstep(uEye.x - 0.06, uEye.x + 0.07, aPos.x) * smoothstep(uEye.z + 0.06, uEye.z - 0.07, aPos.x)',
+    '           * smoothstep(uEye.y - 0.035, uEye.y + 0.055, aPos.y) * smoothstep(uEye.w + 0.035, uEye.w - 0.055, aPos.y);',
+    '  p += uGaze * 0.013 * ew;',
     // 头部以脖子为轴倾转（w 已在前面算好）
     '  float neckY = (uNeck.x - uCenter.y) * uScale;',
     // 以脖子为轴倾转头部
@@ -60,10 +67,6 @@
     '  float s = sin(a), c = cos(a);',
     '  vec2 d = vec2(p.x, p.y - neckY);',
     '  p = vec2(d.x * c - d.y * s, neckY + d.x * s + d.y * c);',
-    // 眼球看向：眼部区域的顶点随视线方向整体小幅平移（边缘 smoothstep 羽化不撕裂脸）
-    '  float ew = smoothstep(uEye.x - 0.05, uEye.x + 0.06, aPos.x) * smoothstep(uEye.z + 0.05, uEye.z - 0.06, aPos.x)',
-    '           * smoothstep(uEye.y - 0.03, uEye.y + 0.05, aPos.y) * smoothstep(uEye.w + 0.03, uEye.w - 0.05, aPos.y);',
-    '  p += uGaze * 0.013 * ew;',
     // 发丝摆动：越靠上越明显
     '  float lag = sin(uTime * 1.7 - aPos.y * 2.6) * 0.5 + sin(uTime * 0.9 + aPos.x * 3.1) * 0.5;',
     '  p.x += lag * uSway.x * (0.35 + 0.65 * w) * (0.5 + 0.5 * abs(p.x));',
@@ -121,7 +124,8 @@
     'attribute vec2 aBlink;',
     'attribute vec2 aExpr;',
     'uniform float uTilt, uBreath, uScale, uAspect, uBlink, uExpr, uAMul, uBody, uHip;',
-    'uniform vec2 uCenter, uNeck, uOff;',
+    'uniform vec2 uCenter, uNeck, uOff, uGaze;',
+    'uniform vec4 uEye;',
     'varying vec2 vUv;',
     'varying float vA;',
     'void main(){',
@@ -139,6 +143,10 @@
     '  p = vec2(hd.x * cos(ab) - hd.y * sin(ab), hipY + hd.x * sin(ab) + hd.y * cos(ab));',
     // 呼吸：只保留整体小幅升降（胸腔扩张与裙尾摆动省略）
     '  p.y += (uBreath - 1.0) * 0.19;',
+    // 眼球看向（与 full 版一致：先局部位移，再随头旋转）
+    '  float ew = smoothstep(uEye.x - 0.06, uEye.x + 0.07, aPos.x) * smoothstep(uEye.z + 0.06, uEye.z - 0.07, aPos.x)',
+    '           * smoothstep(uEye.y - 0.035, uEye.y + 0.055, aPos.y) * smoothstep(uEye.w + 0.035, uEye.w - 0.055, aPos.y);',
+    '  p += uGaze * 0.013 * ew;',
     // 头部倾转
     '  float w = smoothstep(uNeck.x, uNeck.y, aPos.y);',
     '  float a = uTilt * w;',
@@ -385,10 +393,14 @@
   };
 
   /* 画布像素尺寸：按 CSS 宽 × dpr，超过 maxPixels 就整体等比缩小，
-     保证高分屏够锐、低端机也不至于被填充率拖死。 */
+     保证高分屏够锐、低端机也不至于被填充率拖死。
+     降档只允许缩到满分辨率的 62%，且物理宽度不低于 300px——
+     再低就是画布被 CSS 拉伸放大，观感直接变马赛克（旧档位曾压到 0.40）。 */
   Furina.prototype.pixelSize = function (cssW) {
     var dpr = this.o.dpr || 1;
-    var w = Math.max(1, cssW * dpr * (this.q || 1)), h = w / (this.aspect || 0.6667);
+    var fullW = Math.max(1, cssW * dpr);
+    var floorW = Math.min(fullW, 300);
+    var w = Math.max(fullW * (this.q || 1), floorW), h = w / (this.aspect || 0.6667);
     var cap = this.o.maxPixels || 3200000;
     if (w * h > cap) {
       var k = Math.sqrt(cap / (w * h));
@@ -477,19 +489,27 @@
     this.mStart = mStart;
     this.mCount = mCount;
     /* 每个掩码体的静态包围盒（模型空间）——渲染时用它把模板清屏/遮罩绘制
-       裁剪到屏幕上的小块，代替全屏 stencil clear（低端 GPU 省一大截带宽） */
+       裁剪到屏幕上的小块，代替全屏 stencil clear（低端 GPU 省一大截带宽）。
+       注意：必须对「所有有几何的部件」都算，不能只算 maskTarget。
+       眼睛就是反例——眼白只当别人的遮罩、自己不被遮罩，只算 maskTarget 的话
+       它的盒子会是全 0，scissor 退化成一个点，掩码几何被整片裁掉，
+       瞳孔层就消失了（表现为眼睛变白洞）。 */
     var mBox = new Float32Array(d.N * 4);
     for (i = 0; i < d.N; i++) {
-      if (!d.maskTarget[i] || d.ic[i] === 0) continue;
+      if (d.ic[i] === 0 || !gV || mCount[i] === 0) continue;
       var bx0 = 1e9, by0 = 1e9, bx1 = -1e9, by1 = -1e9;
-      for (k = 0; k < d.ic[i]; k++) {
-        var qx = gV[(mStart[i] + k) * 5], qy = gV[(mStart[i] + k) * 5 + 1];
+      for (k = 0; k < mCount[i]; k++) {
+        var qi = (mStart[i] + k) * 5;
+        var qx = gV[qi], qy = gV[qi + 1];
         if (qx < bx0) bx0 = qx; if (qx > bx1) bx1 = qx;
         if (qy < by0) by0 = qy; if (qy > by1) by1 = qy;
       }
+      if (bx0 > bx1) continue;
       mBox[i * 4] = bx0; mBox[i * 4 + 1] = by0; mBox[i * 4 + 2] = bx1; mBox[i * 4 + 3] = by1;
     }
     this.maskBox = mBox;
+    this.maskHasBox = new Uint8Array(d.N);
+    for (i = 0; i < d.N; i++) this.maskHasBox[i] = (mBox[i * 4] <= mBox[i * 4 + 2]) ? 1 : 0;
     this.gv = mkBuf(gl, gV);
 
     /* ---------- 2. 可见几何 + run 表（rebuild() 时重算这一段） ---------- */
@@ -596,9 +616,11 @@
       /* 体态摇曳的旋转轴：髋部 */
       hip: y0 + bh * 0.37,
       halfW: Math.max(0.08, box.w * 0.30),
-      /* 眼部区域（眼球看向位移的作用范围）：脖子以上、头部中段 */
-      eyeX0: x0c - bw * 0.17, eyeX1: x0c + bw * 0.17,
-      eyeY0: y0 + bh * 0.735, eyeY1: y0 + bh * 0.86
+      /* 眼部区域（眼球看向位移的作用范围）：只包住双眼，不含额头和眉毛。
+         范围是从实际眼睛部件几何量出来的（y 0.446~0.521，x ±0.075），
+         旧值取 0.735~0.86 会把眉毛、额头一起平移，看起来整张脸在动。 */
+      eyeX0: x0c - bw * 0.225, eyeX1: x0c + bw * 0.225,
+      eyeY0: y0 + bh * 0.800, eyeY1: y0 + bh * 0.852
     };
     this.bbox = box;
 
@@ -822,6 +844,7 @@
     this.runItemId = new Int32Array(rc);
     var maskRef = [], maskCnt = 0;
     this.runBox = new Float32Array(rc * 4);   // 掩码联合包围盒（无掩码 run 填 -1e9）
+    this.runVisBox = new Float32Array(rc * 4); // 可见几何包围盒
     for (n = 0; n < rc; n++) {
       this.runV0[n] = runs[n].v0;
       this.runVN[n] = runs[n].vn;
@@ -832,7 +855,7 @@
       var ub0 = 1e9, ub1 = 1e9, ub2 = -1e9, ub3 = -1e9;
       for (j = 0; j < runs[n].masks.length; j++) {
         m = runs[n].masks[j];
-        if (m < d.N && mCount[m] > 0) {
+        if (m < d.N && mCount[m] > 0 && this.maskHasBox[m]) {
           maskRef.push(mStart[m], mCount[m]); maskCnt++;
           if (this.maskBox[m * 4] < ub0) ub0 = this.maskBox[m * 4];
           if (this.maskBox[m * 4 + 1] < ub1) ub1 = this.maskBox[m * 4 + 1];
@@ -843,6 +866,17 @@
       if (ub0 > ub2) { ub0 = ub1 = ub2 = ub3 = -1e9; }
       this.runBox[n * 4] = ub0; this.runBox[n * 4 + 1] = ub1;
       this.runBox[n * 4 + 2] = ub2; this.runBox[n * 4 + 3] = ub3;
+      /* 可见几何自身的包围盒（模型空间）。scissor 必须同时盖住掩码几何和
+         可见几何：只按掩码盒裁的话，眨眼/表情位移把几何挪出掩码盒时就会被切掉 */
+      var vb0 = 1e9, vb1 = 1e9, vb2 = -1e9, vb3 = -1e9;
+      for (j = 0; j < runs[n].vn; j++) {
+        var vo = (runs[n].v0 + j) * 5;
+        var vx = bV[vo], vy = bV[vo + 1];
+        if (vx < vb0) vb0 = vx; if (vx > vb2) vb2 = vx;
+        if (vy < vb1) vb1 = vy; if (vy > vb3) vb3 = vy;
+      }
+      this.runVisBox[n * 4] = vb0; this.runVisBox[n * 4 + 1] = vb1;
+      this.runVisBox[n * 4 + 2] = vb2; this.runVisBox[n * 4 + 3] = vb3;
     }
     this.runMaskOff[rc] = maskCnt;
     this.maskRef = new Int32Array(maskRef);
@@ -1069,11 +1103,13 @@
   };
   Furina.prototype.applyPerf = function () {
     var L = this._perfL;
-    this.q = [1, 0.85, 0.7, 0.6, 0.5, 0.4][L];
+    /* 分辨率档位：宁可少降一点分辨率、多降一点帧率，也不让画面糊成马赛克。
+       最低 0.62（再被 pixelSize 的 300px 硬下限兜底）。 */
+    this.q = [1, 0.90, 0.82, 0.75, 0.68, 0.62][L];
     this._fiv = L === 0 ? 0 : (L >= 5 ? 42 : 33);
     this.resize();
-    /* 跨档动作：L≥3 换精简 shader，L≥2 换低清图集（各自只在跨阈值时动作一次） */
-    this.switchPerf(L >= 3, L >= 2);
+    /* 跨档动作：L≥3 换精简 shader，L≥3 换低清图集（各自只在跨阈值时动作一次） */
+    this.switchPerf(L >= 3, L >= 3);
   };
 
   /* 低档降级执行器：精简顶点着色器 + 低清图集。
@@ -1128,6 +1164,7 @@
     var gl = this.gl;
     if (!gl || gl.isContextLost()) return;
     gl.viewport(0, 0, this.cv.width, this.cv.height);
+    gl.disable(gl.SCISSOR_TEST);   // 防止上一帧残留的 scissor 裁掉本帧 clear
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
     gl.disable(gl.BLEND);
@@ -1273,7 +1310,7 @@
     /* 只清颜色。stencil 不需要全屏清：每个掩码 run 自己在 scissor 范围内清零，
        读取 stencil（NOTEQUAL）也只发生在 scissor 内，区域外残值永远读不到。
        省一次全屏 stencil 写带宽（低端 GPU 上每帧可观的固定开销）。 */
-    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
     gl.enable(gl.STENCIL_TEST);
 
     var idle = this.o.idle !== false;
@@ -1357,15 +1394,18 @@
       : nm.body;
 
     gl.uniform1f(u.uTime, time);
-    gl.uniform1f(u.uTilt, -this.cur.x * 0.16 + nm.tilt);
+    /* 头 / 眼 / 身三段协调：头部承担约 7.5° 的转向，眼珠只补剩余偏角；
+       身体只做极轻微的重心跟随（0.010），不再整体横移（旧值 0.026 会让
+       整个人像贴纸一样跟着鼠标滑，和头、眼的转动幅度完全不成比例） */
+    gl.uniform1f(u.uTilt, -this.cur.x * 0.245 + nm.tilt);
     gl.uniform1f(u.uBreath, breath);
     gl.uniform1f(u.uScale, b.scale);
     gl.uniform1f(u.uAspect, this.cv.height / this.cv.width);
     gl.uniform2f(u.uCenter, b.cx, b.cy);
     gl.uniform2f(u.uNeck, b.neck, b.neckTop);
-    gl.uniform2f(u.uOff, this.cur.x * 0.026 + nm.offX, -this.cur.y * 0.017 + nm.offY);
-    /* 眼球看向：把视线向量传给 shader，只位移眼部区域 */
-    gl.uniform2f(u.uGaze, this.cur.x * 0.85, this.cur.y * 0.6);
+    gl.uniform2f(u.uOff, this.cur.x * 0.010 + nm.offX, -this.cur.y * 0.012 + nm.offY);
+    /* 眼球看向：在头部局部坐标系里生效（shader 中位于 tilt 之前），随头一起转 */
+    gl.uniform2f(u.uGaze, this.cur.x * 0.85, -this.cur.y * 0.62);
     gl.uniform4f(u.uEye, b.eyeX0, b.eyeY0, b.eyeX1, b.eyeY1);
     gl.uniform2f(u.uSway, idle ? 0.006 : 0, idle ? 0.0026 : 0);
     gl.uniform2f(u.uSkirt, b.skirtTop, b.skirtBottom);
@@ -1392,6 +1432,7 @@
     var AB = this.aBlink, AE = this.aExpr, DYN = this.dynTotal, EF = this.exprFrame;
     var FV = this.fv, HAS = !!FV;
     var rc = this.runV0.length;
+    var scPrev = false;
 
     /* 主几何在 BUF，帧位移在 FV。两组属性的顶点下标基准必须一致：
        drawArrays 的 first 会叠加到所有属性上，所以这里统一用 first=0，
@@ -1425,11 +1466,13 @@
        这里用 JS 复刻顶点变换链（体态/呼吸/头部倾转/发丝摆动/偏移，摆动取 ± 极值），
        把模型空间包围盒精确投影到当前帧的像素矩形。 */
     var SC = b.scale, ASP = this.cv.height / this.cv.width, CW = this.cv.width, CH = this.cv.height;
-    var tiltV = -this.cur.x * 0.16 + nm.tilt;
-    var offVX = this.cur.x * 0.026 + nm.offX, offVY = -this.cur.y * 0.017 + nm.offY;
+    /* 必须与 draw() 里传给 shader 的系数完全一致，否则 scissor 会算小，
+       边缘视线时眼睛的掩码几何被裁，局部缺块 */
+    var tiltV = -this.cur.x * 0.245 + nm.tilt;
+    var offVX = this.cur.x * 0.010 + nm.offX, offVY = -this.cur.y * 0.012 + nm.offY;
     var swayVX = idle ? 0.006 : 0;
     var bodyV = this.bodyA || 0, brV = breath - 1;
-    var RB = this.runBox;
+    var RB = this.runBox, VBX = this.runVisBox;
     function ssN(e0, e1, x) {
       var t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
       return t * t * (3 - 2 * t);
@@ -1457,22 +1500,33 @@
     function scissorFor(n) {
       var n4 = n * 4;
       if (!RB || RB[n4] > RB[n4 + 2]) return false;
+      /* 掩码盒 ∪ 可见盒：任何一边被裁掉都会让整层消失（眼睛变白洞就是这么来的） */
+      var bx0 = RB[n4], by0 = RB[n4 + 1], bx1 = RB[n4 + 2], by1 = RB[n4 + 3];
+      if (VBX) {
+        if (VBX[n4] < bx0) bx0 = VBX[n4];
+        if (VBX[n4 + 1] < by0) by0 = VBX[n4 + 1];
+        if (VBX[n4 + 2] > bx1) bx1 = VBX[n4 + 2];
+        if (VBX[n4 + 3] > by1) by1 = VBX[n4 + 3];
+      }
       var minX = 1e9, minY = 1e9, maxX = -1e9, maxY = -1e9, pt;
       for (var xi = 0; xi < 2; xi++) for (var yi = 0; yi < 2; yi++) {
         for (var sg = -1; sg <= 1; sg += 2) {
-          pt = cornerPx(xi ? RB[n4 + 2] : RB[n4], yi ? RB[n4 + 3] : RB[n4 + 1], sg);
+          pt = cornerPx(xi ? bx1 : bx0, yi ? by1 : by0, sg);
           if (pt[0] < minX) minX = pt[0]; if (pt[0] > maxX) maxX = pt[0];
           if (pt[1] < minY) minY = pt[1]; if (pt[1] > maxY) maxY = pt[1];
         }
       }
       /* 余量随分辨率缩放：眼部位移是模型空间量（≈0.011 单位），
          高 DPR 下像素数会放大，固定像素余量会不够 */
-      var pad = Math.max(10, 0.045 * SC * CH * 0.5);
+      var pad = Math.max(12, 0.045 * SC * CH * 0.5);
       minX -= pad; minY -= pad; maxX += pad; maxY += pad;
       if (minX < 0) minX = 0; if (minY < 0) minY = 0;
       if (maxX > CW) maxX = CW; if (maxY > CH) maxY = CH;
       if (maxX - minX < 2 || maxY - minY < 2) return false;
-      gl.scissor(minX, CH - maxY, maxX - minX, maxY - minY);
+      /* cornerPx 返回的已是 GL 坐标（左下原点），直接用作 scissor 原点，
+         不能再做 CH-maxY 翻转——二次翻转会把矩形镜像到画布下半身，
+         掩码在真实位置被裁光，眼睛就变成白洞 */
+      gl.scissor(minX, minY, maxX - minX, maxY - minY);
       return true;
     }
 
@@ -1486,7 +1540,8 @@
       var masked = !!(this.o.clip && m1 > m0);
       if (!masked) { m0 = m1 = 0; }
       var scOn = masked && !this.o.debugMask && scissorFor(n);
-      if (scOn) gl.enable(gl.SCISSOR_TEST);
+      if (scOn) { gl.enable(gl.SCISSOR_TEST); scPrev = true; }
+      else if (scPrev) { gl.disable(gl.SCISSOR_TEST); scPrev = false; }
       if (masked) {
         /* 掩码阶段：只写模板，不写颜色；帧权重必须归零 */
         gl.uniform1f(u.uBlink, 0);
