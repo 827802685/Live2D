@@ -187,7 +187,7 @@
   var boot = document.getElementById('boot');
   var bootT = document.getElementById('boot-t');
 
-  var DEF = { angleX: 26, angleY: 16, angleZ: 20, bodyAngleX: 6, deadZone: 0.06 };
+  var DEF = { angleX: 26, pitch: 100, angleZ: 20, bodyAngleX: 6, deadZone: 0.06 };
   /* kelvdela-panel.js 先加载：已合并 localStorage 保存值；兜底用 DEF */
   var cfg = window.__kelvdelaConfig || (window.__kelvdelaConfig = DEF);
 
@@ -242,6 +242,79 @@
   var EXPR_EYE = { Smile: 0.75, Sad: 0.9, Angry: 0.55, Surprised: 1 };
   var EXPR_EYEBALL_Y = { Smile: 0, Sad: -0.4, Angry: 0, Surprised: 0 };
 
+  /* ---------- 俯仰合成（抬/低头） ----------
+     这个模型是 psd2live 从单张立绘程序化绑骨的，实测 ParamAngleY ±30° 只让整颗头
+     上下平移 1.4px、头部高度变化 4px —— 也就是说它没有"俯仰"，只有"漂浮"。
+     所以垂直方向不再用 AngleY 驱动，改为渲染前直接改写顶点：
+     以头顶为支点做竖直压缩/拉伸，抬头时下巴上抬+面部变短，低头时下巴下沉+面部变长，
+     等于手工补上了模型缺失的俯仰变形。支点固定在头顶，因此不会出现网格撕裂。 */
+  var WARP_IDS = ['ArtMeshLayer', 'ArtMeshHeadwear', 'ArtMeshBackHair', 'ArtMeshFrontHair',
+    'ArtMeshFrontHair_SeeThrough', 'ArtMeshFace', 'ArtMeshEyelashR', 'ArtMeshEyelashL',
+    'ArtMeshEyebrowL', 'ArtMeshEyebrowL_SeeThrough', 'ArtMeshEyewhiteR', 'ArtMeshEyewhiteL',
+    'ArtMeshIridesR', 'ArtMeshIridesL', 'ArtMeshEarsR', 'ArtMeshEarsL', 'ArtMeshNose',
+    'ArtMeshEarwear', 'ArtMeshMouth', 'ArtMeshMouth_lip_0', 'ArtMeshMouth_lip_1'];
+
+  var pitch = {
+    p: 0,          // -1 低头 … +1 抬头
+    gain: 0.020,   // 下巴最大升降量（模型单位，1 单位 ≈ 860px）
+    lift: 0,       // 整颗头的刚体升降量（与压缩叠加，卖出"头在动"的感觉）
+    Y_TOP: 0.405,  // 支点：头顶（冠座顶部）
+    Y_CHIN: 0.182, // 头顶到下巴的距离
+    Y_LOW: 0.130,  // 长发丝下沿，低于此不再跟随，避免把长发一起压短
+    Y_MID: 0.238   // 权重饱和高度（下巴附近即满权重）
+  };
+
+  function installPitchWarp() {
+    var cm = im.coreModel;
+    var idx = [], i, k;
+    for (i = 0; i < WARP_IDS.length; i++) {
+      k = cm.getDrawableIndex(WARP_IDS[i]);
+      if (k >= 0) idx.push(k);
+    }
+    if (!idx.length) return;
+    window.__pitch = pitch;   // 调试/外部调参用
+
+    /* 渲染器用"顶点是否变化"做门控，改了顶点必须让它重新上传 */
+    cm.getDrawableDynamicFlagVertexPositionsDidChange = function () { return true; };
+
+    var snap = {};      // 索引 -> 变形前的 y 副本
+    var dirty = true;   // 是否刚被 Core 重算过
+    var baseUpdate = cm.update ? cm.update.bind(cm) : null;
+    if (baseUpdate) cm.update = function () { baseUpdate(); dirty = true; };
+
+    var ren = im.renderer;
+    var draw = ren.doDrawModel.bind(ren);
+    ren.doDrawModel = function () {
+      var n, j, m, v, src, arr;
+      if (dirty) {                       // 只在 Core 重算后重新取基准，避免重复叠加
+        dirty = false;
+        for (n = 0; n < idx.length; n++) {
+          v = cm.getDrawableVertexPositions(idx[n]);
+          arr = snap[idx[n]];
+          if (!arr || arr.length !== (v.length >> 1)) arr = snap[idx[n]] = new Float32Array(v.length >> 1);
+          for (j = 0, m = 0; j < v.length; j += 2, m++) arr[m] = v[j + 1];
+        }
+      }
+      var amp = pitch.gain * pitch.p;
+      var lift = pitch.lift * pitch.p;
+      for (n = 0; n < idx.length; n++) {
+        v = cm.getDrawableVertexPositions(idx[n]);
+        src = snap[idx[n]];
+        if (!src) continue;
+        for (j = 0, m = 0; j < v.length; j += 2, m++) {
+          var y = src[m];
+          var t = (y - pitch.Y_LOW) / (pitch.Y_MID - pitch.Y_LOW);
+          t = t < 0 ? 0 : (t > 1 ? 1 : t);
+          var wt = t * t * (3 - 2 * t);
+          var d = pitch.Y_TOP - y;
+          if (d < 0) d = 0;
+          v[j + 1] = y - lift * wt - amp * (d / pitch.Y_CHIN) * wt;
+        }
+      }
+      return draw();
+    };
+  }
+
   /* ---------- 参数驱动（每帧在 beforeModelUpdate 里落地） ---------- */
   var lastT = performance.now();
   var headS = { x: 0, y: 0 };   // 头部：快跟随
@@ -262,7 +335,8 @@
     var fy = state.follow ? ease(soften(headS.y, cfg.deadZone)) : 0;
 
     cm.setParameterValueById('ParamAngleX', fx * cfg.angleX);
-    cm.setParameterValueById('ParamAngleY', -fy * cfg.angleY);   /* 屏幕向下为正，模型 AngleY 正值是仰头，取反 */
+    /* AngleY 恒为 0：这个参数的形变只是让整颗头平移（"漂浮"），俯仰改由 pitch 顶点合成 */
+    cm.setParameterValueById('ParamAngleY', 0);
     cm.setParameterValueById('ParamAngleZ', -fx * fy * cfg.angleZ * 0.4);
     /* BodyAngle 系列必须归零：psd2live 给的方向与 Angle 相反（Angle 让颈肩左移、Body 让颈肩右移），
        同时驱动会在颈部双向撕扯；待机动作曲线也在写这三个参数，叠加还会抖。 */
@@ -271,6 +345,10 @@
     cm.setParameterValueById('ParamBodyAngleZ', 0);
     cm.setParameterValueById('ParamEyeBallX', fx * 0.6);
     cm.setParameterValueById('ParamEyeBallY', -fy * 0.45);
+
+    /* 俯仰：鼠标在上（fy<0）→ p>0 抬头；gain 由面板百分比换算 */
+    pitch.p = state.follow ? -fy : 0;
+    pitch.gain = 0.020 * ((cfg.pitch === undefined ? 100 : cfg.pitch) / 100);
 
     /* 身体伴随：整只模型做刚体微位移（不改网格，因此不会撕裂），
        慢速跟随头部，做出"头带身体"的层次感 */
@@ -348,6 +426,7 @@
       im.focusController.x = 0;
       im.focusController.y = 0;
       im.on('beforeModelUpdate', drive);
+      installPitchWarp();
 
       document.getElementById('m-t').textContent = Math.round(performance.now() - t0) + ' ms';
       var dn = im.coreModel.getDrawableIds ? im.coreModel.getDrawableIds().length : 28;

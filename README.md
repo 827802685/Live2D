@@ -10,8 +10,10 @@
 
 - 模型文件在 `model/cerydra/`（官方 Cubism 运行时加载，运行时体积约 1.6 MB，含 4096 贴图 / 26 层 / 28 drawable / 20 参数）
 - 编辑源文件（`.cmo3` + 分层 PSD）在 `model/cerydra/src/`
-- 页面能力：视线跟随（角度参数逐帧驱动）、呼吸、眨眼、发丝物理、4 套表情、点头/摇头动作，支持拖动与双击回位
-- 设置面板复刻自 `dist/config-panel.js`（`dist/kelvdela-panel.js`）：滑块即时生效、localStorage(`kelvdelaConfig`) 持久化、可重置/导出，与芙宁娜面板互不干扰
+- 页面能力：视线跟随（水平用 `ParamAngleX`，垂直用**顶点级俯仰合成**）、呼吸、眨眼、发丝物理、4 套表情、点头/摇头动作，支持拖动与双击回位
+- 设置面板复刻自 `dist/config-panel.js`（`dist/kelvdela-panel.js`）：滑块即时生效、localStorage(`kelvdelaConfigV4`) 持久化、可重置/导出，与芙宁娜面板互不干扰
+
+> **关于垂直转向**：psd2live 是从单张立绘程序化绑骨的，实测 `ParamAngleY` ±30° 只会让整颗头上/下平移 1.4px、头部高度变化 4px——它没有俯仰，只有"漂浮"。所以页面把 `ParamAngleY` 恒置 0，改为在渲染前按"头顶固定、下巴随俯仰升降"重写头部各图层的顶点（`installPitchWarp()`），面板里的「头部俯仰幅度」可以 0–200% 调。
 
 ---
 
