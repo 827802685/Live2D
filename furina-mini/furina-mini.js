@@ -109,6 +109,48 @@
     '}'
   ].join('\n');
 
+  /* 精简版顶点着色器：低性能档（L≥3）切换用。
+     每帧约 35 万顶点跑 VS，full 版每顶点 8 个 sin + 8 个 smoothstep，
+     低端 GPU 顶点着色器是最大 ALU 开销；精简版砍掉裙摆/发丝摆动/呆毛弹簧/
+     眼球位移/胸腔呼吸，保留眨眼、表情、头部倾转、体态摇曳、整体呼吸。
+     attribute 位置用 bindAttribLocation 固定，与 full 版完全同布局，切换零成本。 */
+  var VS_LITE = [
+    'attribute vec2 aPos;',
+    'attribute vec2 aUv;',
+    'attribute float aA;',
+    'attribute vec2 aBlink;',
+    'attribute vec2 aExpr;',
+    'uniform float uTilt, uBreath, uScale, uAspect, uBlink, uExpr, uAMul, uBody, uHip;',
+    'uniform vec2 uCenter, uNeck, uOff;',
+    'varying vec2 vUv;',
+    'varying float vA;',
+    'void main(){',
+    '  vUv = aUv;',
+    '  vA = aA * uAMul;',
+    '  vec2 p = aPos + aBlink * uBlink + aExpr * uExpr;',
+    '  p -= uCenter;',
+    '  p.x *= uAspect;',
+    '  p *= uScale;',
+    // 体态摇曳（保留：这是「像真人」的最低限动作）
+    '  float hipY = (uHip - uCenter.y) * uScale;',
+    '  float wb = smoothstep(uHip - 0.08, uHip + 0.08, aPos.y);',
+    '  float ab = uBody * wb;',
+    '  vec2 hd = vec2(p.x, p.y - hipY);',
+    '  p = vec2(hd.x * cos(ab) - hd.y * sin(ab), hipY + hd.x * sin(ab) + hd.y * cos(ab));',
+    // 呼吸：只保留整体小幅升降（胸腔扩张与裙尾摆动省略）
+    '  p.y += (uBreath - 1.0) * 0.19;',
+    // 头部倾转
+    '  float w = smoothstep(uNeck.x, uNeck.y, aPos.y);',
+    '  float a = uTilt * w;',
+    '  float s = sin(a), c = cos(a);',
+    '  vec2 d = vec2(p.x, p.y - (uNeck.x - uCenter.y) * uScale);',
+    '  p = vec2(d.x * c - d.y * s, (uNeck.x - uCenter.y) * uScale + d.x * s + d.y * c);',
+    // 鼠标跟随
+    '  p += uOff * (0.35 + 0.65 * w);',
+    '  gl_Position = vec4(p, 0.0, 1.0);',
+    '}'
+  ].join('\n');
+
   function compile(gl, type, src) {
     var s = gl.createShader(type);
     gl.shaderSource(s, src);
@@ -376,6 +418,13 @@
     var pr = this.pr = gl.createProgram();
     gl.attachShader(pr, compile(gl, gl.VERTEX_SHADER, VS));
     gl.attachShader(pr, compile(gl, gl.FRAGMENT_SHADER, FS));
+    /* attribute 位置固定 0-4：精简版 shader 与 full 版同布局，切换 program 后
+       顶点指针无需重设；pick/wand 两个小 program 各自独立绑定 */
+    gl.bindAttribLocation(pr, 0, 'aPos');
+    gl.bindAttribLocation(pr, 1, 'aUv');
+    gl.bindAttribLocation(pr, 2, 'aA');
+    gl.bindAttribLocation(pr, 3, 'aBlink');
+    gl.bindAttribLocation(pr, 4, 'aExpr');
     gl.linkProgram(pr);
     if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) {
       throw new Error('link: ' + gl.getProgramInfoLog(pr));
@@ -396,6 +445,10 @@
      'uSkirt', 'uSkirtAmp', 'uHalf', 'uPremul', 'uBlink', 'uExpr', 'uAMul',
      'uAho', 'uAhoP', 'uAhoA', 'uBody', 'uHip', 'uEye', 'uGaze']
       .forEach(function (nm) { uu[nm] = gl.getUniformLocation(pr, nm); });
+    this.uFull = uu;   // full 版 uniform 表（切精简版后切回时要还原）
+    this._curMain = pr;  // 当前主渲染 program（full 或精简版）
+    /* 精简版 program 懒编译：applyPerf 首次降到 L≥3 才创建，正常机器零开销 */
+    this._litePr = null;
 
     /* ---------- 1. 掩码几何：每个掩码体只烘焙一次，交错 [x,y,u,v,a] ---------- */
     var pos = d.pos, uv = d.uv, idx = d.idx, KQ = 32767 / 1.5;
@@ -467,6 +520,20 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.uniform1i(gl.getUniformLocation(pr, 'uTex'), 0);
+
+    /* 低清图集（1024²）：低性能档切换用。
+       2048² RGBA 在 GPU 上占 16MB 显存、每次采样带宽也是它的 4 倍，
+       低端 GPU 上纹理带宽是填充率之外的第二大开支；1024² 只要 4MB。
+       画质损失在半分辨率渲染下基本不可见。 */
+    if (o.lowresAtlas !== false) {
+      try {
+        var lc = document.createElement('canvas');
+        lc.width = lc.height = 1024;
+        lc.getContext('2d').drawImage(this.img, 0, 0, 1024, 1024);
+        this.imgLow = lc;
+      } catch (e) { this.imgLow = null; }
+    }
+    this._texLow = false;
 
     /* ---------- 6.5 权杖贴图层：独立小 program + 一个 quad ---------- */
     if (this.wandImg && o.wand !== false) {
@@ -1005,6 +1072,56 @@
     this.q = [1, 0.85, 0.7, 0.6, 0.5, 0.4][L];
     this._fiv = L === 0 ? 0 : (L >= 5 ? 42 : 33);
     this.resize();
+    /* 跨档动作：L≥3 换精简 shader，L≥2 换低清图集（各自只在跨阈值时动作一次） */
+    this.switchPerf(L >= 3, L >= 2);
+  };
+
+  /* 低档降级执行器：精简顶点着色器 + 低清图集。
+     正常机器两样都永不触发（保持 full shader + 原图集），零开销。 */
+  Furina.prototype.switchPerf = function (lite, lowTex) {
+    var gl = this.gl;
+    if (!gl || gl.isContextLost()) return;
+    /* 1. 精简 program 懒编译 */
+    if (lite && !this._litePr) {
+      try {
+        var lp = gl.createProgram();
+        gl.attachShader(lp, compile(gl, gl.VERTEX_SHADER, VS_LITE));
+        gl.attachShader(lp, compile(gl, gl.FRAGMENT_SHADER, FS));
+        gl.bindAttribLocation(lp, 0, 'aPos');
+        gl.bindAttribLocation(lp, 1, 'aUv');
+        gl.bindAttribLocation(lp, 2, 'aA');
+        gl.bindAttribLocation(lp, 3, 'aBlink');
+        gl.bindAttribLocation(lp, 4, 'aExpr');
+        gl.linkProgram(lp);
+        if (!gl.getProgramParameter(lp, gl.LINK_STATUS)) throw new Error('lite link');
+        var ul = {};
+        ['uTime', 'uTilt', 'uBreath', 'uScale', 'uAspect', 'uCenter', 'uNeck', 'uOff', 'uSway',
+         'uSkirt', 'uSkirtAmp', 'uHalf', 'uPremul', 'uBlink', 'uExpr', 'uAMul',
+         'uAho', 'uAhoP', 'uAhoA', 'uBody', 'uHip', 'uEye', 'uGaze']
+          .forEach(function (nm) { ul[nm] = gl.getUniformLocation(lp, nm); });
+        this._litePr = lp;
+        this._uLite = ul;
+        gl.useProgram(lp);
+        gl.uniform1i(ul.uTex, 0);
+        this._bl = null;             // program 换了，uPremul 等 uniform 状态作废
+      } catch (e) { this._litePr = null; }
+    }
+    var cur = (lite && this._litePr) ? this._litePr : this.pr;
+    if (cur !== this._curMain) {
+      this._curMain = cur;
+      this.u = (cur === this.pr) ? this.uFull : this._uLite;
+      gl.useProgram(cur);
+      this._bl = null;
+    }
+    /* 2. 低清图集：重传一次纹理（约 1ms），之后每帧省 12MB 显存占用与 3/4 采样带宽 */
+    if (this.imgLow && lowTex !== this._texLow) {
+      this._texLow = lowTex;
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, this.tex);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, lowTex ? this.imgLow : this.img);
+      gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    }
   };
 
   Furina.prototype.drawPick = function () {
@@ -1037,27 +1154,30 @@
      这里用一个随机调度器在 4~9s 间隔触发小动作，正弦包络起落，
      叠加到 tilt/off/body/breath 四个通道上，全部走平滑不跳变。
      部分动作带配套表情（expr），开始时经同一表情通道淡入。 */
+  /* 动作池提为常量：避免触发时分配数组 */
+  var ACT_POOL = [
+    { n: 'tiltL', w: 3 }, { n: 'tiltR', w: 3 },
+    { n: 'shiftL', w: 2 }, { n: 'shiftR', w: 2 },
+    { n: 'nod', w: 1.5 }, { n: 'sigh', w: 1.5 },
+    { n: 'swayBig', w: 1.5 },
+    { n: 'stretch', w: 1.2, expr: 0 },
+    { n: 'shake', w: 1.2 },
+    { n: 'bounce', w: 1.0, expr: 5 },
+    { n: 'shy', w: 0.8, expr: 10 },
+    { n: 'lookL', w: 1.2, expr: 1 },
+    { n: 'lookR', w: 1.2, expr: 2 }
+  ];
+  var ACT_TOT = (function () { var t = 0, i; for (i = 0; i < ACT_POOL.length; i++) t += ACT_POOL[i].w; return t; })();
+
   Furina.prototype.natural = function (time, idle) {
-    var out = { tilt: 0, offX: 0, offY: 0, body: 0, breath: 0 };
+    /* 输出对象复用：每帧 new 一个小对象会让 GC 在低端机上周期性卡顿 */
+    var out = this._nat || (this._nat = { tilt: 0, offX: 0, offY: 0, body: 0, breath: 0 });
+    out.tilt = 0; out.offX = 0; out.offY = 0; out.body = 0; out.breath = 0;
     if (!idle) { this._act = null; return out; }
     if (this._actT == null) this._actT = time + 2.0 + Math.random() * 3.0;
     if (time > this._actT) {
-      var pool = [
-        { n: 'tiltL', w: 3 }, { n: 'tiltR', w: 3 },
-        { n: 'shiftL', w: 2 }, { n: 'shiftR', w: 2 },
-        { n: 'nod', w: 1.5 }, { n: 'sigh', w: 1.5 },
-        { n: 'swayBig', w: 1.5 },
-        { n: 'stretch', w: 1.2, expr: 0 },
-        { n: 'shake', w: 1.2 },
-        { n: 'bounce', w: 1.0, expr: 5 },
-        { n: 'shy', w: 0.8, expr: 10 },
-        { n: 'lookL', w: 1.2, expr: 1 },
-        { n: 'lookR', w: 1.2, expr: 2 }
-      ];
-      var tot = 0, i;
-      for (i = 0; i < pool.length; i++) tot += pool[i].w;
-      var pick = Math.random() * tot, act = pool[0];
-      for (i = 0; i < pool.length; i++) { pick -= pool[i].w; if (pick <= 0) { act = pool[i]; break; } }
+      var pick = Math.random() * ACT_TOT, act = ACT_POOL[0], i;
+      for (i = 0; i < ACT_POOL.length; i++) { pick -= ACT_POOL[i].w; if (pick <= 0) { act = ACT_POOL[i]; break; } }
       this._act = {
         name: act.n,
         expr: act.expr || 0,
@@ -1150,7 +1270,10 @@
     var cssW = this.cv.clientWidth || this.o.size;
     if (cssW !== this._lastCssW) { this._lastCssW = cssW; this.resize(); }
     gl.viewport(0, 0, this.cv.width, this.cv.height);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
+    /* 只清颜色。stencil 不需要全屏清：每个掩码 run 自己在 scissor 范围内清零，
+       读取 stencil（NOTEQUAL）也只发生在 scissor 内，区域外残值永远读不到。
+       省一次全屏 stencil 写带宽（低端 GPU 上每帧可观的固定开销）。 */
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.STENCIL_TEST);
 
     var idle = this.o.idle !== false;
@@ -1478,7 +1601,7 @@
     /* 恢复主渲染状态：混合每 run 会重设但缓存要作废；图集绑定也要还原 */
     this._bl = null;
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    gl.useProgram(this.pr);
+    gl.useProgram(this._curMain || this.pr);
   };
 
   /* 权杖开关：setWand(false) 隐藏贴图层 */
