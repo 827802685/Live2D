@@ -205,7 +205,7 @@
   /* CDN 缓存穿透版本号：CDN 用 commit SHA 引用（缓存内容永远精确）；发新版后需同步更新 SHA。
      推送新版后 CDN 线路可能还在发旧文件。资源 URL 带上 VER 后，
      新版本号必然 miss 回源拉最新。每次更新 JS 后改一下 VER 即可。 */
-  var VER = 'v20261031a';
+  var VER = 'v20261101a';
   /* 同域（本地部署）与仓库目录各备选一个路径，谁的 furina-mini.js 在就用谁 */
   var CAND = ['furina-mini/furina-mini.js', 'dist/furina-mini.js'];
 
