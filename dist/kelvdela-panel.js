@@ -13,17 +13,17 @@
   // 内置默认值（与 kelvdela.html 中 ?? 回退值一致）
   // 幅度按立绘网格变形安全区标定：全幅 ±30° 会把 psd2live 变形器拉变形
   var DEFAULTS = {
-    angleX: 18,      // 头部水平跟手灵敏度
-    angleY: 14,      // 头部垂直跟手灵敏度
-    angleZ: 18,      // 头部倾斜跟手灵敏度（实际峰值再乘 0.4）
-    bodyAngleX: 5,   // 身体跟手灵敏度
+    angleX: 26,      // 头部水平跟手灵敏度
+    angleY: 16,      // 头部垂直跟手灵敏度
+    angleZ: 20,      // 头部倾斜跟手灵敏度（实际峰值再乘 0.4）
+    bodyAngleX: 6,   // 身体伴随刚体位移（像素 = 值 × 0.6）
     deadZone: 0.06   // 垂直软死区（仰角越小越抑制抖动）
   };
 
-  // 读取当前配置：localStorage(v2) > 页面预置 > 内置默认（刷新后保持）
+  // 读取当前配置：localStorage(v3) > 页面预置 > 内置默认（刷新后保持）
   function ensureConfig() {
     var saved = null;
-    try { saved = JSON.parse(localStorage.getItem('kelvdelaConfigV2') || 'null'); } catch (e) {}
+    try { saved = JSON.parse(localStorage.getItem('kelvdelaConfigV3') || 'null'); } catch (e) {}
     var base = JSON.parse(JSON.stringify(saved || window.__kelvdelaConfig || DEFAULTS));
     for (var k in DEFAULTS) if (!(k in base) || typeof base[k] !== 'number') base[k] = DEFAULTS[k];
     window.__kelvdelaConfig = base;
@@ -36,7 +36,7 @@
     { key: 'angleX', label: '头部水平灵敏度',  min: 0, max: 60, step: 1,  unit: '', desc: '鼠标水平移动时头部跟随幅度' },
     { key: 'angleY', label: '头部垂直灵敏度',  min: 0, max: 60, step: 1,  unit: '', desc: '鼠标垂直移动时头部跟随幅度' },
     { key: 'angleZ', label: '头部倾斜灵敏度',  min: 0, max: 60, step: 1,  unit: '', desc: '头部左右倾斜幅度' },
-    { key: 'bodyAngleX', label: '身体灵敏度',  min: 0, max: 30, step: 1,  unit: '', desc: '鼠标水平移动时身体跟随幅度' },
+    { key: 'bodyAngleX', label: '身体伴随位移',  min: 0, max: 30, step: 1,  unit: '', desc: '整只模型随视线的刚体微位移（像素级，不改网格，慢速跟随头部）' },
     { key: 'deadZone', label: '仰角软死区',    min: 0, max: 0.3, step: 0.005, unit: '', desc: '鼠标接近模型水平线时抑制抖动；调大更稳、调小更灵敏' }
   ];
 
@@ -93,7 +93,7 @@
     input.addEventListener('input', function () {
       var v = parseFloat(input.value);
       config[f.key] = v;
-      try { localStorage.setItem('kelvdelaConfigV2', JSON.stringify(config)); } catch (e) {}
+      try { localStorage.setItem('kelvdelaConfigV3', JSON.stringify(config)); } catch (e) {}
       val.textContent = formatVal(f, v);
     });
     row.appendChild(input);
@@ -132,7 +132,7 @@
   }
   actions.appendChild(mkBtn('重置', function () {
     Object.keys(DEFAULTS).forEach(function (k) { config[k] = DEFAULTS[k]; });
-    try { localStorage.removeItem('kelvdelaConfigV2'); localStorage.removeItem('kelvdelaConfig'); } catch (e) {}
+    try { ['kelvdelaConfig','kelvdelaConfigV2','kelvdelaConfigV3'].forEach(function(k){ localStorage.removeItem(k); }); } catch (e) {}
     FIELDS.forEach(function (f) {
       var b = sliders[f.key]; b.input.value = DEFAULTS[f.key]; b.val.textContent = formatVal(f, DEFAULTS[f.key]);
     });

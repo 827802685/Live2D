@@ -187,12 +187,12 @@
   var boot = document.getElementById('boot');
   var bootT = document.getElementById('boot-t');
 
-  var DEF = { angleX: 18, angleY: 14, angleZ: 18, bodyAngleX: 5, deadZone: 0.06 };
+  var DEF = { angleX: 26, angleY: 16, angleZ: 20, bodyAngleX: 6, deadZone: 0.06 };
   /* kelvdela-panel.js 先加载：已合并 localStorage 保存值；兜底用 DEF */
   var cfg = window.__kelvdelaConfig || (window.__kelvdelaConfig = DEF);
 
   var state = { follow: true, breath: true, blink: true, physics: true, idle: true, expr: null };
-  var model = null, im = null;
+  var model = null, im = null, holder = null;
   var t0 = performance.now();
 
   /* ---------- 画布 ---------- */
@@ -209,6 +209,10 @@
   app.view.style.height = '100%';
   app.view.style.display = 'block';
   host.appendChild(app.view);
+
+  /* 刚体容器：只用来给"身体伴随"加整体微位移，不参与网格变形 */
+  holder = new PIXI.Container();
+  app.stage.addChild(holder);
 
   /* ---------- 指针 ---------- */
   var ptr = { tx: 0, ty: 0, x: 0, y: 0 };
@@ -229,9 +233,10 @@
     return (v < 0 ? -1 : 1) * u * u * (3 - 2 * u);
   }
 
-  /* 平方缓动：常用行程内幅度温和，只有贴近画布边缘才到满幅，
-     避免 psd2live 九宫格变形器在 ±30° 全幅下把立绘网格拉变形 */
-  function ease(v) { return v * Math.abs(v); }
+  /* 软缓动：中段保留一半响应，边缘收敛到满幅。
+     纯粹平方会让中间行程几乎无感；这里 0.55 线性 + 0.45 三次，
+     既保证鼠标小幅移动时头有反应，又不会在角落顶到变形临界 */
+  function ease(v) { var a = Math.abs(v); return v * (0.55 + 0.45 * a * a); }
 
   /* 表情激活时接管眼睛开合（待机动作的眨眼曲线会盖过表情） */
   var EXPR_EYE = { Smile: 0.75, Sad: 0.9, Angry: 0.55, Surprised: 1 };
@@ -239,24 +244,42 @@
 
   /* ---------- 参数驱动（每帧在 beforeModelUpdate 里落地） ---------- */
   var lastT = performance.now();
+  var headS = { x: 0, y: 0 };   // 头部：快跟随
+  var bodyS = { x: 0, y: 0 };   // 身体：慢跟随（刚体位移，不改网格）
   function drive() {
     var now = performance.now();
     var dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
-    var k = 1 - Math.pow(0.0005, dt);       // 指数平滑，约 0.12s 时间常数
-    ptr.x += (ptr.tx - ptr.x) * k;
-    ptr.y += (ptr.ty - ptr.y) * k;
+    var kHead = 1 - Math.pow(0.00003, dt);   // τ≈0.08s 头先动
+    var kBody = 1 - Math.pow(0.02, dt);      // τ≈0.29s 身体随后
+    headS.x += (ptr.tx - headS.x) * kHead;
+    headS.y += (ptr.ty - headS.y) * kHead;
+    bodyS.x += (headS.x - bodyS.x) * kBody;
+    bodyS.y += (headS.y - bodyS.y) * kBody;
 
     var cm = im.coreModel;
-    var fx = state.follow ? ease(ptr.x) : 0;
-    var fy = state.follow ? ease(soften(ptr.y, cfg.deadZone)) : 0;
+    var fx = state.follow ? ease(headS.x) : 0;
+    var fy = state.follow ? ease(soften(headS.y, cfg.deadZone)) : 0;
 
     cm.setParameterValueById('ParamAngleX', fx * cfg.angleX);
     cm.setParameterValueById('ParamAngleY', -fy * cfg.angleY);   /* 屏幕向下为正，模型 AngleY 正值是仰头，取反 */
     cm.setParameterValueById('ParamAngleZ', -fx * fy * cfg.angleZ * 0.4);
-    cm.setParameterValueById('ParamBodyAngleX', fx * cfg.bodyAngleX);
+    /* BodyAngle 系列必须归零：psd2live 给的方向与 Angle 相反（Angle 让颈肩左移、Body 让颈肩右移），
+       同时驱动会在颈部双向撕扯；待机动作曲线也在写这三个参数，叠加还会抖。 */
+    cm.setParameterValueById('ParamBodyAngleX', 0);
+    cm.setParameterValueById('ParamBodyAngleY', 0);
+    cm.setParameterValueById('ParamBodyAngleZ', 0);
     cm.setParameterValueById('ParamEyeBallX', fx * 0.6);
     cm.setParameterValueById('ParamEyeBallY', -fy * 0.45);
+
+    /* 身体伴随：整只模型做刚体微位移（不改网格，因此不会撕裂），
+       慢速跟随头部，做出"头带身体"的层次感 */
+    if (holder) {
+      var bx = state.follow ? bodyS.x : 0;
+      var by = state.follow ? bodyS.y : 0;
+      holder.x = bx * cfg.bodyAngleX * 0.6;
+      holder.y = by * cfg.bodyAngleX * 0.3;
+    }
 
     if (state.expr && EXPR_EYE[state.expr] !== undefined) {
       /* 表情接管眼睛：不受眨眼/待机动作干扰 */
@@ -318,7 +341,7 @@
       model = window.__model = m;
       im = m.internalModel;
       m.anchor.set(0.5, 0.5);
-      app.stage.addChild(m);
+      holder.addChild(m);
       fit();
 
       /* 关掉内建焦点驱动，角度改由上面 drive() 全权接管 */
