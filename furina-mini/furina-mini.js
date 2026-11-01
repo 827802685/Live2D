@@ -778,6 +778,26 @@
     var hasAnim = !!(K && DVT);
     var dq = 0;
 
+    /* 表情位移只作用在「五官」部件上。
+       烘焙数据里有些表情帧会把头发/帽子整体平移几像素（比如 y 跨到 0.61 的
+       那撮刘海，位移 0.024），uExpr 一上身整个脑袋都跟着动，观感就是
+       「表情把身体也带跑了」。这里按部件的几何范围打权重：y 上界高过眉毛、
+       y 下界低于下巴、横向超出脸宽的部件完全不参与表情位移。 */
+    var exprWt = new Float32Array(d.N);
+    if (hasAnim) {
+      for (i = 0; i < d.N; i++) {
+        if (!d.dynSet[i]) continue;
+        var iy0 = 1e9, iy1 = -1e9, ix0 = 1e9, ix1 = -1e9;
+        for (k = 0; k < d.ic[i]; k++) {
+          var vvE = (idx[d.iOff[i] + k] + d.vOff[i]) * 2;
+          var qye = pos[vvE + 1] / KQ, qxe = pos[vvE] / KQ;
+          if (qye < iy0) iy0 = qye; if (qye > iy1) iy1 = qye;
+          if (qxe < ix0) ix0 = qxe; if (qxe > ix1) ix1 = qxe;
+        }
+        exprWt[i] = (iy1 < 0.548 && iy0 > 0.395 && ix0 > -0.16 && ix1 < 0.16) ? 1 : 0;
+      }
+    }
+
     var bV = new Float32Array(total * 5);
     var fV = hasAnim ? new Float32Array(K * DVT * 2) : null;
     var itemStart = [], itemCount = [], itemId = [];
@@ -804,11 +824,23 @@
           bV[b5 + 4] = av;
           if (run.dyn && hasAnim) {
             var q = dq + k;
+            var wE = exprWt[i];
             for (var f = 0; f < K; f++) {
               var s0 = (f * dynVerts + dOff + lv) * 2;
               var t2 = (f * DVT + q) * 2;
-              fV[t2] = d.anim[s0] / 32767 * 1.5 - bx;
-              fV[t2 + 1] = d.anim[s0 + 1] / 32767 * 1.5 - by;
+              var ex = d.anim[s0] / 32767 * 1.5 - bx;
+              var ey = d.anim[s0 + 1] / 32767 * 1.5 - by;
+              if (wE) {
+                /* 软上限：个别帧的个别顶点位移会偏大，硬钳会把三角形撕出折痕，
+                   按比例压缩能保住形状轮廓 */
+                var mg = Math.sqrt(ex * ex + ey * ey);
+                if (mg > 0.05) {
+                  var kk = (0.05 + (mg - 0.05) * 0.35) / mg;
+                  ex *= kk; ey *= kk;
+                }
+              } else { ex = 0; ey = 0; }   // 头发/帽子/脖子：不吃帧位移
+              fV[t2] = ex;
+              fV[t2 + 1] = ey;
             }
           }
           p++;
@@ -1192,17 +1224,21 @@
      叠加到 tilt/off/body/breath 四个通道上，全部走平滑不跳变。
      部分动作带配套表情（expr），开始时经同一表情通道淡入。 */
   /* 动作池提为常量：避免触发时分配数组 */
+  /* 动作池：只驱动身体（倾头、重心、呼吸、弹跳…）。
+     以前 stretch/bounce/shy/look 这类动作会顺带切表情，于是用户看到的
+     是「表情一出来整个人就在动」；现在表情交给下面的 autoExpr 独立调度，
+     动作和表情互不牵连。 */
   var ACT_POOL = [
     { n: 'tiltL', w: 3 }, { n: 'tiltR', w: 3 },
     { n: 'shiftL', w: 2 }, { n: 'shiftR', w: 2 },
     { n: 'nod', w: 1.5 }, { n: 'sigh', w: 1.5 },
     { n: 'swayBig', w: 1.5 },
-    { n: 'stretch', w: 1.2, expr: 0 },
+    { n: 'stretch', w: 1.2 },
     { n: 'shake', w: 1.2 },
-    { n: 'bounce', w: 1.0, expr: 5 },
-    { n: 'shy', w: 0.8, expr: 10 },
-    { n: 'lookL', w: 1.2, expr: 1 },
-    { n: 'lookR', w: 1.2, expr: 2 }
+    { n: 'bounce', w: 1.0 },
+    { n: 'shy', w: 0.8 },
+    { n: 'lookL', w: 1.2 },
+    { n: 'lookR', w: 1.2 }
   ];
   var ACT_TOT = (function () { var t = 0, i; for (i = 0; i < ACT_POOL.length; i++) t += ACT_POOL[i].w; return t; })();
 
@@ -1347,14 +1383,20 @@
     if (idle && this.o.autoExpr !== false && this.frameCount > 1 && this.o.forceExpr == null && !this.exprWant) {
       if (this._nextExpr == null) this._nextExpr = t + 2000 + Math.random() * 2800;
       else if (t > this._nextExpr) {
-        var pool = this.o.autoExprList || [5, 6, 10, 1, 2, 3, 4, 5, 8];
-        var pick = pool[(Math.random() * pool.length) | 0] | 0;
-        if (pick > 0 && pick < this.frameCount) {
-          this.exprWant = pick;
-          /* 视线瞟一眼很短，情绪停留久一些 */
-          this._holdUntil = t + (pick <= 4 ? 650 + Math.random() * 550 : 1500 + Math.random() * 1700);
+        /* 只在身体动作结束后才换表情：表情和身体动作错开，
+           避免「表情一出来人就在动」的错觉（两者本来是两个独立通道） */
+        if (this._act) {
+          this._nextExpr = t + 400 + Math.random() * 600;
+        } else {
+          var pool = this.o.autoExprList || [5, 6, 10, 1, 2, 3, 4, 5, 8];
+          var pick = pool[(Math.random() * pool.length) | 0] | 0;
+          if (pick > 0 && pick < this.frameCount) {
+            this.exprWant = pick;
+            /* 视线瞟一眼很短，情绪停留久一些 */
+            this._holdUntil = t + (pick <= 4 ? 650 + Math.random() * 550 : 1500 + Math.random() * 1700);
+          }
+          this._nextExpr = t + 2400 + Math.random() * 4200;
         }
-        this._nextExpr = t + 2400 + Math.random() * 4200;
       }
     }
 
